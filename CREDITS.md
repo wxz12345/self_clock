@@ -27,7 +27,7 @@ CC-BY 条目分发时保留本文件即为署名。
 | storm3.mp3 | 雷雨③ | [33 Minute Thunderstorm](https://freesound.org/s/817285/) by BobVoldar | CC-BY 4.0 | 34 min |
 | storm4.mp3 | 雷雨④ | [Rain and Thunder Ambience Tübingen](https://freesound.org/s/369547/) by Sheyvan | CC0 | 14 min |
 | storm5.mp3 | 雷雨⑤ | [Night thunderstorm on suburbs](https://freesound.org/s/874803/) by kevp888 | CC-BY 4.0 | 41 min |
-| pure_thunder.mp3 | 纯雷声 | [Thunderstorm_June](https://freesound.org/s/338374/) by DaveOfDefeat2248 | **CC-BY-NC**（仅限个人使用） | 18 min |
+| pure_thunder.mp3 | 纯雷声 | [Thunderstorm_June](https://freesound.org/s/338374/) by DaveOfDefeat2248 | **CC-BY-NC**（仅限个人使用；**未随本仓库与安装包分发**，作者本地自用） | 18 min |
 | crickets.mp3 | 虫鸣 | [Frogs and birds chirping in the fields at midnight after a rain](https://freesound.org/s/746877/) by lastraindrop | CC0 | 12 min |
 | waves.mp3 | 海浪 | [Waves and birdsong](https://freesound.org/s/144164/) by juskiddink | CC-BY 4.0 | 10 min |
 | fire.mp3 | 篝火 | [RainyBird](https://github.com/Everloom-129/RainyBird) `sounds/fireplace-with-crackling-sounds.mp3` | MIT（随仓库） | ~4 min |

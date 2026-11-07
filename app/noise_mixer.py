@@ -52,6 +52,8 @@ class NoiseMixerDialog(QDialog):
         self._rows = {}
         mix = self._load_mix()
         for name in NOISES:
+            if not self.sound.has_noise(name):
+                continue  # 音源文件缺失（如未随仓库分发的 NC 音色）则不显示该行
             level = float(mix.get(name, 0.0))
             row = QHBoxLayout()
             checkbox = QCheckBox(NOISE_LABELS.get(name, name))

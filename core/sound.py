@@ -57,6 +57,10 @@ class SoundPlayer(QObject):
                 return candidate
         return None
 
+    def has_noise(self, name: str) -> bool:
+        """该音色的音频文件是否存在（打包分发时可能剔除部分音色）。"""
+        return name in NOISES and self._source_path(name) is not None
+
     # ---------- 提示音 ----------
     def play(self, name: str) -> None:
         if not self.enabled:
