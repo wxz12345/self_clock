@@ -25,7 +25,8 @@ class _StatCard(QFrame):
     def __init__(self, caption: str):
         super().__init__()
         self.setObjectName("stat_card")
-        theme.apply_card_shadow(self)
+        # 注意：滚动容器内不要挂 QGraphicsDropShadowEffect（滚动重绘会撕裂），
+        # 立体感由 QSS 细边框提供
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(4)
@@ -371,7 +372,6 @@ class StatsView(QWidget):
     def _card(self) -> QFrame:
         frame = QFrame()
         frame.setObjectName("card")
-        theme.apply_card_shadow(frame)
         return frame
 
     # ---------- 概览 ----------

@@ -133,8 +133,14 @@ def build_qss() -> str:
 }}
 QMainWindow, QDialog {{ background: {p['BG']}; }}
 QWidget#sidebar {{ background: {p['BG_SIDEBAR']}; }}
-QFrame#card {{ background: {p['CARD']}; border-radius: 12px; }}
-QFrame#stat_card {{ background: {p['CARD']}; border-radius: 12px; }}
+QFrame#card {{
+    background: {p['CARD']}; border-radius: 12px;
+    border: 1px solid {_rgba(p['BORDER'], 0.7)};
+}}
+QFrame#stat_card {{
+    background: {p['CARD']}; border-radius: 12px;
+    border: 1px solid {_rgba(p['BORDER'], 0.7)};
+}}
 QLabel#title {{ font-size: 17px; font-weight: bold; }}
 QLabel#muted, QLabel#muted2 {{ color: {p['TEXT_DIM']}; }}
 QLabel#muted2 {{ font-size: 12px; }}
