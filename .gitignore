@@ -14,3 +14,4 @@ dist/
 # 预览与临时文件
 preview/
 .zcode/
+*.log
