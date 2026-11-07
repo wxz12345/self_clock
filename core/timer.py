@@ -140,6 +140,8 @@ class PomodoroTimer(QObject):
         if self._phase.is_break and self._running:
             self._stop_all()
             self._phase = Phase.FOCUS
+            # _stop_all 发出的 state_changed 带的是旧 phase，这里补一次让 UI 同步
+            self.state_changed.emit()
 
     def dismiss_break(self) -> None:
         """未开始的休息直接跳过（待休息状态）。"""
@@ -171,8 +173,9 @@ class PomodoroTimer(QObject):
                    else Phase.SHORT_BREAK)
         else:
             nxt = Phase.FOCUS
-        self._stop_all()
+        # 先切换 phase 再停表：_stop_all 发出的 state_changed 需要携带新 phase
         self._phase = nxt
+        self._stop_all()
         auto_started = False
         # 休息按设置自动开始；专注永远等用户手动开始（开始的动作本身就是自控仪式）
         if nxt.is_break and self.auto_start_breaks:

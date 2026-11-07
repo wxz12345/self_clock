@@ -45,10 +45,10 @@ class MiniOverlay(QWidget):
         self.btn_skip = QPushButton("跳过")
         self.btn_skip.setFixedHeight(30)
         self.btn_skip.clicked.connect(self.skip_requested.emit)
-        self.btn_expand = QPushButton("⤢")
+        self.btn_expand = QPushButton("返回")
         self.btn_expand.setToolTip("返回主窗口（也可以双击迷你窗背景）")
         self.btn_expand.setFixedHeight(30)
-        self.btn_expand.setFixedWidth(34)
+        self.btn_expand.setFixedWidth(56)
         self.btn_expand.clicked.connect(self.expand_requested.emit)
 
         row = QHBoxLayout()
