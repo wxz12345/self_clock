@@ -189,29 +189,14 @@ class MainWindow(QMainWindow):
     # ================= 页面切换 =================
     def _switch_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
-        self._fade_page()
+        # 注意：不要给 stack 挂 QGraphicsOpacityEffect 之类的效果器——
+        # 在部分显卡/驱动下会把自绘控件渲染成空白（计时环消失就是这个原因）
         if index == 2:
             self.reminders_view.refresh(self.store.get_reminders())
         elif index == 3:
             self.stats_view.refresh()
         elif index == 1:
             self._refresh_tasks()
-
-    def _fade_page(self) -> None:
-        """切页时轻微淡入（150ms），给导航一点呼吸感。"""
-        from PySide6.QtCore import QEasingCurve, QPropertyAnimation
-        from PySide6.QtWidgets import QGraphicsOpacityEffect
-        if not hasattr(self, "_fade_effect"):
-            self._fade_effect = QGraphicsOpacityEffect(self.stack)
-            self._fade_anim = QPropertyAnimation(self._fade_effect, b"opacity")
-            self._fade_anim.setDuration(150)
-            self._fade_anim.setEasingCurve(QEasingCurve.OutCubic)
-            self.stack.setGraphicsEffect(self._fade_effect)
-        self._fade_effect.setOpacity(0.55)
-        self._fade_anim.stop()
-        self._fade_anim.setStartValue(0.55)
-        self._fade_anim.setEndValue(1.0)
-        self._fade_anim.start()
 
     # ================= 番茄钟流转 =================
     def _on_start_requested(self) -> None:

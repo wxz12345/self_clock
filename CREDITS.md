@@ -12,8 +12,8 @@
 
 | 文件 | 来源 |
 |------|------|
-| rain.mp3 雨声 | [freesound.org/s/157767](https://freesound.org/s/157767/)（128kbps/48kHz） |
-| thunder.mp3 雷雨 | [freesound.org/s/157002](https://freesound.org/s/157002/)（128kbps/44.1kHz） |
+| rain.mp3 雨声 | [freesound.org/s/752219](https://freesound.org/s/752219/) "Rain on Car Roof (parked car)" by gsparrysound（128kbps/48kHz，双声道平衡） |
+| thunder.mp3 雷雨 | [freesound.org/s/37307](https://freesound.org/s/37307/) "thunderstorm2" by Jambozal（128kbps/44.1kHz，真实雷暴田野录音，8.5 分钟） |
 | waves.mp3 海浪 | [freesound.org/s/144164](https://freesound.org/s/144164/)（128kbps/44.1kHz） |
 | brown.mp3 棕噪音 | [freesound.org/s/165056](https://freesound.org/s/165056/)（128kbps/44.1kHz）；另有代码合成的 `brown.wav` 作后备 |
 | wind.mp3 风声 | [freesound.org/s/263492](https://freesound.org/s/263492/)（128kbps/48kHz） |
