@@ -517,8 +517,10 @@ class MainWindow(QMainWindow):
     # ================= 外观 / 提醒 =================
     def _on_theme_changed(self, name: str) -> None:
         theme.set_theme(name)
-        QApplication.instance().setStyleSheet(theme.build_qss())
-        for widget in QApplication.allWidgets():
+        app = QApplication.instance()
+        app.setPalette(theme.build_palette())
+        app.setStyleSheet(theme.build_qss())
+        for widget in app.allWidgets():
             widget.update()
         self.store.set_setting("theme", name)
 

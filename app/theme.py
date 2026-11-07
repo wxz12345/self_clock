@@ -28,15 +28,16 @@ DARK = {
     "BAR": "#4b5468",          # 普通柱/次要条
     "OVERLAY": (23, 26, 33, 236),  # 迷你窗半透明卡
     "TRACK": "#2c313d",        # 进度环底环
+    "SHADOW": (0, 0, 0, 110),  # 卡片投影
 }
 
 LIGHT = {
     "NAME": "light",
-    "BG": "#f3f5f8",
+    "BG": "#f4f6fa",
     "BG_SIDEBAR": "#ffffff",
     "CARD": "#ffffff",
     "CARD_2": "#eef1f6",
-    "BORDER": "#d9dee7",
+    "BORDER": "#dfe4ec",
     "TEXT": "#22272e",
     "TEXT_DIM": "#68707c",
     "ACCENT": "#3f9d5a",
@@ -49,6 +50,7 @@ LIGHT = {
     "BAR": "#c3cad6",
     "OVERLAY": (255, 255, 255, 242),
     "TRACK": "#e2e7ee",
+    "SHADOW": (30, 40, 60, 36),
 }
 
 PALETTES = {"dark": DARK, "light": LIGHT}
@@ -87,6 +89,27 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHECK_ICON = os.path.join(_PROJECT_ROOT, "assets", "check.png")
 
 
+def build_palette():
+    """与调色板同步的 QPalette：兜底所有未被 QSS 覆盖的原生部件（托盘菜单等）。"""
+    from PySide6.QtGui import QColor, QPalette
+    p = QPalette()
+    p.setColor(QPalette.Window, QColor(P["BG"]))
+    p.setColor(QPalette.WindowText, QColor(P["TEXT"]))
+    p.setColor(QPalette.Base, QColor(P["CARD"]))
+    p.setColor(QPalette.AlternateBase, QColor(P["CARD_2"]))
+    p.setColor(QPalette.Text, QColor(P["TEXT"]))
+    p.setColor(QPalette.Button, QColor(P["CARD"]))
+    p.setColor(QPalette.ButtonText, QColor(P["TEXT"]))
+    p.setColor(QPalette.Highlight, QColor(P["ACCENT"]))
+    p.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    p.setColor(QPalette.ToolTipBase, QColor(P["CARD_2"]))
+    p.setColor(QPalette.ToolTipText, QColor(P["TEXT"]))
+    p.setColor(QPalette.PlaceholderText, QColor(P["TEXT_DIM"]))
+    p.setColor(QPalette.BrightText, QColor(P["DANGER"]))
+    p.setColor(QPalette.Link, QColor(P["LONG_BREAK_COLOR"]))
+    return p
+
+
 def build_qss() -> str:
     """根据当前调色板生成 QSS。切换主题后需重新调用。"""
     p = P
@@ -113,6 +136,7 @@ QPushButton {{
     padding: 7px 14px;
 }}
 QPushButton:hover {{ background: {p['BORDER']}; }}
+QPushButton:pressed {{ background: {p['BORDER']}; padding-top: 8px; padding-bottom: 6px; }}
 QPushButton:disabled {{ color: {p['TEXT_DIM']}; background: {p['CARD']}; }}
 QPushButton#primary {{
     background: {p['ACCENT']}; border: none; color: #ffffff; font-weight: bold;
@@ -129,6 +153,7 @@ QPushButton#nav {{
 QPushButton#nav:hover {{ background: {_rgba(p['TEXT_DIM'], 0.12)}; color: {p['TEXT']}; }}
 QPushButton#nav:checked {{
     background: {_rgba(p['ACCENT'], 0.16)}; color: {p['ACCENT']}; font-weight: bold;
+    border-left: 3px solid {p['ACCENT']}; padding-left: 11px;
 }}
 
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QDateTimeEdit {{
@@ -196,6 +221,24 @@ QScrollBar::handle:horizontal {{
 }}
 
 QMessageBox {{ background: {p['BG_SIDEBAR']}; }}
+
+QMenu {{
+    background: {p['CARD']}; color: {p['TEXT']};
+    border: 1px solid {p['BORDER']}; border-radius: 10px; padding: 6px;
+}}
+QMenu::item {{
+    padding: 8px 26px 8px 14px; border-radius: 6px; background: transparent;
+}}
+QMenu::item:selected {{ background: {_rgba(p['ACCENT'], 0.16)}; color: {p['ACCENT']}; }}
+QMenu::item:pressed {{ background: {_rgba(p['ACCENT'], 0.3)}; }}
+QMenu::separator {{ height: 1px; background: {p['BORDER']}; margin: 6px 10px; }}
+QMenu::icon {{ padding-left: 10px; }}
+QMenuBar {{ background: {p['BG_SIDEBAR']}; color: {p['TEXT']}; }}
+QMenuBar::item:selected {{ background: {_rgba(p['ACCENT'], 0.16)}; }}
+
+QScrollArea {{ background: transparent; border: none; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+
 QToolTip {{
     background: {p['CARD_2']}; color: {p['TEXT']}; border: 1px solid {p['BORDER']};
     padding: 4px 8px; border-radius: 6px;

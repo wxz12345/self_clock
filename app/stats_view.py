@@ -6,7 +6,8 @@ from datetime import date, timedelta
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QTabWidget, QToolTip, QVBoxLayout, QWidget)
+                               QScrollArea, QTabWidget, QToolTip,
+                               QVBoxLayout, QWidget)
 
 from core import gamify
 
@@ -351,10 +352,19 @@ class StatsView(QWidget):
         root.addWidget(title)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_overview_tab(), "概览")
-        self.tabs.addTab(self._build_weekly_tab(), "周趋势")
-        self.tabs.addTab(self._build_review_tab(), "周回顾")
+        self.tabs.addTab(self._scrollable(self._build_overview_tab()), "概览")
+        self.tabs.addTab(self._scrollable(self._build_weekly_tab()), "周趋势")
+        self.tabs.addTab(self._scrollable(self._build_review_tab()), "周回顾")
         root.addWidget(self.tabs, stretch=1)
+
+    @staticmethod
+    def _scrollable(page: QWidget) -> QWidget:
+        """内容超出可视高度时可滚动，不再挤压图表。"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(page)
+        return scroll
 
     # ---------- 概览 ----------
     def _build_overview_tab(self) -> QWidget:

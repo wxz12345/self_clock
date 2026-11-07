@@ -65,6 +65,7 @@ def main() -> int:
 
     store = Store(os.path.join(BASE_DIR, "data"))
     theme.set_theme(store.get_setting("theme", "dark"))
+    app.setPalette(theme.build_palette())
     app.setStyleSheet(theme.build_qss())
 
     from app import icons  # noqa: E402
