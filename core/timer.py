@@ -76,6 +76,24 @@ class PomodoroTimer(QObject):
         self.rounds_before_long = max(1, int(rounds))
         self.auto_start_breaks = auto_start_breaks
 
+    def set_focus_minutes(self, minutes: float) -> None:
+        """手动修改本次专注时长：待机改默认；运行/暂停中保留已专注部分，
+        按新总时长重算剩余时间，立即反映到倒计时。"""
+        total = max(1.0, float(minutes)) * 60
+        self.durations[Phase.FOCUS] = float(minutes)
+        if self._phase == Phase.FOCUS and self._running and not self._paused:
+            elapsed = max(0.0, self._planned_sec - self.remaining_seconds())
+            self._planned_sec = total
+            self._end_ts = time.time() + max(1.0, total - elapsed)
+            self.tick.emit(max(1.0, total - elapsed),
+                           min(1.0, elapsed / total))
+        elif self._phase == Phase.FOCUS and self._paused:
+            elapsed = max(0.0, self._planned_sec - self._remaining)
+            self._planned_sec = total
+            self._remaining = max(1.0, total - elapsed)
+            self.tick.emit(max(1.0, total - elapsed),
+                           min(1.0, elapsed / total))
+
     # ---------- 控制 ----------
     def start_focus(self) -> None:
         self._start(Phase.FOCUS)

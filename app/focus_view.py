@@ -98,6 +98,7 @@ class FocusView(QWidget):
         self.duration_combo.setFixedWidth(76)
         self.duration_combo.setValidator(self._minutes_validator())
         self.duration_combo.currentIndexChanged.connect(self._on_duration_changed)
+        self.duration_combo.editTextChanged.connect(self._on_duration_text_changed)
         task_row.addWidget(self.duration_combo)
         task_row.addWidget(QLabel("分钟"))
         task_row.addSpacing(14)
@@ -198,6 +199,16 @@ class FocusView(QWidget):
         from PySide6.QtGui import QIntValidator
         v = QIntValidator(1, 180, self)
         return v
+
+    def _on_duration_text_changed(self, text: str) -> None:
+        if self._updating_duration:
+            return
+        try:
+            minutes = int(text)
+        except ValueError:
+            return
+        if 1 <= minutes <= 180:
+            self.duration_selected.emit(minutes)
 
     def _on_duration_changed(self, index: int) -> None:
         if self._updating_duration:

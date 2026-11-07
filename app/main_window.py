@@ -525,12 +525,15 @@ class MainWindow(QMainWindow):
             self.focus_view.category_combo.blockSignals(False)
 
     def _on_duration_selected(self, minutes: int) -> None:
-        """专注页手动设置"本次专注"时长：立即生效（设置页默认值不受影响）。"""
-        self.timer.durations[Phase.FOCUS] = float(minutes)
+        """专注页手动设置"本次专注"时长：立即反映到倒计时
+        （运行/暂停中保留已专注部分；设置页默认值不受影响）。"""
+        self.timer.set_focus_minutes(minutes)
         if not self.timer.running and not self.timer.paused:
             planned = minutes * 60
             self.focus_view.set_time(
                 self._fmt_remaining(planned), 0.0, Phase.FOCUS.value)
+        if self.overlay is not None and self.overlay.isVisible():
+            self._refresh_overlay()
 
     # ================= 外观 / 提醒 =================
     def _on_theme_changed(self, name: str) -> None:
@@ -631,6 +634,7 @@ class MainWindow(QMainWindow):
                              s.get_int("long_break_min", 15),
                              s.get_int("rounds_before_long", 4),
                              s.get_int("auto_start_breaks", 1) == 1)
+        self.focus_view.set_duration(int(self.timer.durations[Phase.FOCUS]))
         self.sound.enabled = s.get_int("sound_enabled", 1) == 1
         self.monitor.set_blacklist(s.get_blacklist())
 
