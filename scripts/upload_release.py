@@ -44,7 +44,8 @@ def get_token() -> str:
     raise RuntimeError("未找到 GitHub 凭证")
 
 
-def api(url: str, token: str, data=None, headers=None, method=None):
+def api(url: str, token: str, data=None, headers=None, method=None,
+        timeout: int = 600):
     req = urllib.request.Request(url, method=method)
     req.add_header("Authorization", f"token {token}")
     req.add_header("User-Agent", "self_clock-release")
@@ -52,7 +53,7 @@ def api(url: str, token: str, data=None, headers=None, method=None):
         req.add_header(k, v)
     body = data if isinstance(data, bytes) else (
         json.dumps(data).encode() if data else None)
-    with urllib.request.urlopen(req, body, timeout=120) as resp:
+    with urllib.request.urlopen(req, body, timeout=timeout) as resp:
         content = resp.read().decode()
         return json.loads(content) if content else {}
 
