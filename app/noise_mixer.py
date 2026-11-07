@@ -4,14 +4,21 @@ import json
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel,
-                               QPushButton, QSlider, QVBoxLayout)
+                               QPushButton, QScrollArea, QSlider,
+                               QVBoxLayout, QWidget)
 
 from core.sound import DEFAULT_VOLUME, NOISES
 
 NOISE_LABELS = {
-    "rain": "🌧 雨声", "thunder": "⛈ 雷雨", "waves": "🌊 海浪",
-    "fire": "🔥 篝火", "wind": "🍃 风声", "birds": "🐦 鸟鸣",
-    "cafe": "☕ 咖啡馆", "brown": "🟤 棕噪音",
+    "rain": "🌧 雨声·车顶",
+    "storm1": "⛈ 雷雨①", "storm2": "⛈ 雷雨②", "storm3": "⛈ 雷雨③",
+    "storm4": "⛈ 雷雨④", "storm5": "⛈ 雷雨⑤",
+    "pure_thunder": "🌩 纯雷声（NC）",
+    "pure_rain1": "🌧 纯雨声①", "pure_rain2": "🌧 纯雨声②",
+    "pure_rain3": "🌧 纯雨声③",
+    "crickets": "🦗 虫鸣",
+    "waves": "🌊 海浪", "fire": "🔥 篝火", "wind": "🍃 风声",
+    "birds": "🐦 鸟鸣", "cafe": "☕ 咖啡馆", "brown": "🟤 棕噪音",
 }
 
 
@@ -21,14 +28,26 @@ class NoiseMixerDialog(QDialog):
         self.sound = sound
         self.store = store
         self.setWindowTitle("白噪音混音器")
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(400)
+        self.setMinimumHeight(560)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 16)
-        layout.setSpacing(10)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 20, 24, 16)
+        outer.setSpacing(10)
         hint = QLabel("可同时叠加多种声音，各自调音量；设置实时保存。")
         hint.setObjectName("muted")
-        layout.addWidget(hint)
+        outer.addWidget(hint)
+
+        # 音色较多，列表区可滚动
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        list_body = QWidget()
+        layout = QVBoxLayout(list_body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        scroll.setWidget(list_body)
+        outer.addWidget(scroll, stretch=1)
 
         self._rows = {}
         mix = self._load_mix()
@@ -53,6 +72,7 @@ class NoiseMixerDialog(QDialog):
             layout.addLayout(row)
             self._rows[name] = {"checkbox": checkbox, "slider": slider,
                                 "label": value_label, "applying": False}
+        layout.addStretch(1)
 
         buttons = QHBoxLayout()
         stop_all = QPushButton("全部停止")
@@ -63,8 +83,7 @@ class NoiseMixerDialog(QDialog):
         close = QPushButton("关闭")
         close.setObjectName("primary")
         close.clicked.connect(self.accept)
-        buttons.addWidget(close)
-        layout.addLayout(buttons)
+        outer.addLayout(buttons)
 
     # ---------- 数据 ----------
     def _load_mix(self) -> dict:

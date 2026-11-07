@@ -11,7 +11,12 @@ from PySide6.QtCore import QObject, QUrl
 from PySide6.QtMultimedia import (QAudioOutput, QMediaPlayer, QSoundEffect)
 
 SOUNDS = ("bell", "chime", "coin", "reminder")
-NOISES = ("rain", "thunder", "waves", "fire", "wind", "birds", "cafe", "brown")
+# 白噪音注册表：键对应 assets/noise/<键>.mp3，顺序即混音器显示顺序
+NOISES = (
+    "rain", "pure_rain1", "pure_rain2", "pure_rain3",
+    "storm1", "storm2", "storm3", "storm4", "storm5", "pure_thunder",
+    "waves", "fire", "wind", "birds", "cafe", "crickets", "brown",
+)
 DEFAULT_VOLUME = 0.45
 
 
