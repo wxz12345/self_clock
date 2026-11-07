@@ -28,7 +28,8 @@ STAGE_EMOJI = {"种子": "🌱", "幼苗": "🌿", "小树": "🌳", "大树": "
 def card() -> QFrame:
     frame = QFrame()
     frame.setObjectName("card")
-    theme.apply_card_shadow(frame)
+    # 不挂 QGraphicsDropShadowEffect：悬停局部重绘会导致卡片消失（Qt 渲染缺陷），
+    # 立体感由 QSS 细边框 + 卡片/背景色差提供
     return frame
 
 

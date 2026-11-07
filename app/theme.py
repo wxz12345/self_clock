@@ -30,7 +30,6 @@ DARK = {
     "BAR": "#4b5468",          # 普通柱/次要条
     "OVERLAY": (23, 26, 33, 236),  # 迷你窗半透明卡
     "TRACK": "#2c313d",        # 进度环底环
-    "SHADOW": (0, 0, 0, 110),  # 卡片投影
 }
 
 LIGHT = {
@@ -52,7 +51,6 @@ LIGHT = {
     "BAR": "#c3cad6",
     "OVERLAY": (255, 255, 255, 242),
     "TRACK": "#e2e7ee",
-    "SHADOW": (30, 40, 60, 36),
 }
 
 PALETTES = {"dark": DARK, "light": LIGHT}
@@ -89,16 +87,6 @@ def set_theme(name: str) -> None:
 # 项目根（开发时=仓库根；PyInstaller 打包后 _MEIPASS 下同样有 app/ 与 assets/）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHECK_ICON = os.path.join(_PROJECT_ROOT, "assets", "check.png")
-
-
-def apply_card_shadow(widget, blur: int = 26, dy: int = 5) -> None:
-    """给卡片添加随主题变化的柔和投影（浅色下让卡片"浮"起来）。"""
-    from PySide6.QtWidgets import QGraphicsDropShadowEffect
-    effect = QGraphicsDropShadowEffect(widget)
-    effect.setColor(QColor(*P["SHADOW"]))
-    effect.setBlurRadius(blur)
-    effect.setOffset(0, dy)
-    widget.setGraphicsEffect(effect)
 
 
 def build_palette():
