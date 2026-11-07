@@ -10,8 +10,8 @@ import urllib.request
 
 REPO = "wxz12345/self_clock"
 TAG = sys.argv[1] if len(sys.argv) > 1 else "v1.0.0"
-ASSET = "dist/SelfClock_v1.0.0_win64.zip"
-ASSET_NAME = "SelfClock_v1.0.0_win64.zip"
+ASSET = f"dist/SelfClock_{TAG}_win64.zip"
+ASSET_NAME = f"SelfClock_{TAG}_win64.zip"
 
 NOTES = """## 自律番茄钟 — 桌面即下即用版
 
@@ -53,7 +53,8 @@ def api(url: str, token: str, data=None, headers=None, method=None):
     body = data if isinstance(data, bytes) else (
         json.dumps(data).encode() if data else None)
     with urllib.request.urlopen(req, body, timeout=120) as resp:
-        return json.loads(resp.read().decode())
+        content = resp.read().decode()
+        return json.loads(content) if content else {}
 
 
 def main() -> None:
