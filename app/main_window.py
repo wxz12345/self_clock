@@ -91,12 +91,18 @@ class MainWindow(QMainWindow):
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(190)
         side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(14, 18, 14, 18)
-        side_layout.setSpacing(6)
+        side_layout.setContentsMargins(14, 20, 14, 18)
+        side_layout.setSpacing(4)
         logo = QLabel("🍅 自律番茄钟")
         logo.setObjectName("title")
+        logo.setStyleSheet("font-size: 18px; letter-spacing: 1px;")
         side_layout.addWidget(logo)
-        side_layout.addSpacing(14)
+        brand_sub = QLabel("SELF · CONTROL")
+        brand_sub.setObjectName("muted2")
+        brand_sub.setStyleSheet("letter-spacing: 3px; font-size: 10px; color: %s;"
+                                % theme.ACCENT)
+        side_layout.addWidget(brand_sub)
+        side_layout.addSpacing(16)
 
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
@@ -111,9 +117,8 @@ class MainWindow(QMainWindow):
             side_layout.addWidget(btn)
             self.nav_buttons.append(btn)
         side_layout.addStretch(1)
-        self.sidebar_hint = QLabel("温和记录 · 数据都在本地")
+        self.sidebar_hint = QLabel("温和记录 · 本地存储")
         self.sidebar_hint.setObjectName("muted2")
-        self.sidebar_hint.setWordWrap(True)
         side_layout.addWidget(self.sidebar_hint)
         root.addWidget(sidebar)
 
@@ -184,12 +189,29 @@ class MainWindow(QMainWindow):
     # ================= 页面切换 =================
     def _switch_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
+        self._fade_page()
         if index == 2:
             self.reminders_view.refresh(self.store.get_reminders())
         elif index == 3:
             self.stats_view.refresh()
         elif index == 1:
             self._refresh_tasks()
+
+    def _fade_page(self) -> None:
+        """切页时轻微淡入（150ms），给导航一点呼吸感。"""
+        from PySide6.QtCore import QEasingCurve, QPropertyAnimation
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        if not hasattr(self, "_fade_effect"):
+            self._fade_effect = QGraphicsOpacityEffect(self.stack)
+            self._fade_anim = QPropertyAnimation(self._fade_effect, b"opacity")
+            self._fade_anim.setDuration(150)
+            self._fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+            self.stack.setGraphicsEffect(self._fade_effect)
+        self._fade_effect.setOpacity(0.55)
+        self._fade_anim.stop()
+        self._fade_anim.setStartValue(0.55)
+        self._fade_anim.setEndValue(1.0)
+        self._fade_anim.start()
 
     # ================= 番茄钟流转 =================
     def _on_start_requested(self) -> None:

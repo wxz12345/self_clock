@@ -36,8 +36,14 @@ class TimerRing(QWidget):
         p.setPen(track)
         p.drawArc(ring_rect, 0, 360 * 16)
 
-        # 进度弧（从 12 点顺时针）
+        # 进度弧（从 12 点顺时针）：先画一层宽而淡的辉光，再画主线
         if self._progress > 0:
+            glow = QPen(QColor(self._color), pen_w * 2.0)
+            glow.setCapStyle(Qt.RoundCap)
+            glow.setColor(QColor(self._color.red(), self._color.green(),
+                                 self._color.blue(), 42))
+            p.setPen(glow)
+            p.drawArc(ring_rect, 90 * 16, int(-360 * self._progress * 16))
             pen = QPen(QColor(self._color), pen_w)
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)

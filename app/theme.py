@@ -4,9 +4,11 @@
 用法：
 - theme.set_theme('light') 会更新模块级颜色常量（theme.ACCENT 等），
   自绘控件随后调用 self.update() 即可用新色重绘；
-- QApplication 需要重新 setStyleSheet(theme.build_qss())。
+- QApplication 需要重新 setPalette(build_palette()) + setStyleSheet(build_qss())。
 """
 import os
+
+from PySide6.QtGui import QColor
 
 # ---------- 调色板定义 ----------
 DARK = {
@@ -87,6 +89,16 @@ def set_theme(name: str) -> None:
 # 项目根（开发时=仓库根；PyInstaller 打包后 _MEIPASS 下同样有 app/ 与 assets/）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHECK_ICON = os.path.join(_PROJECT_ROOT, "assets", "check.png")
+
+
+def apply_card_shadow(widget, blur: int = 26, dy: int = 5) -> None:
+    """给卡片添加随主题变化的柔和投影（浅色下让卡片"浮"起来）。"""
+    from PySide6.QtWidgets import QGraphicsDropShadowEffect
+    effect = QGraphicsDropShadowEffect(widget)
+    effect.setColor(QColor(*P["SHADOW"]))
+    effect.setBlurRadius(blur)
+    effect.setOffset(0, dy)
+    widget.setGraphicsEffect(effect)
 
 
 def build_palette():

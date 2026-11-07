@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel,
 
 from core.timer import Phase
 
+from . import theme
 from .timer_ring import TimerRing
 from .tree_widget import TreeWidget
 
@@ -27,6 +28,7 @@ STAGE_EMOJI = {"种子": "🌱", "幼苗": "🌿", "小树": "🌳", "大树": "
 def card() -> QFrame:
     frame = QFrame()
     frame.setObjectName("card")
+    theme.apply_card_shadow(frame)
     return frame
 
 
@@ -247,3 +249,8 @@ class FocusView(QWidget):
         self.tree_stage_label.setText(f"{stage_emoji} {stage_name} · {coins} 金币")
         self.goal_label.setText(f"目标 {today_count}/{goal} 🍅")
         self.streak_label.setText(f"🔥 连击 {streak_days} 天")
+        self.tree_stage_label.setStyleSheet(f"color: {theme.GOLD}; font-weight: bold;")
+        if today_count >= goal:
+            self.goal_label.setStyleSheet(f"color: {theme.ACCENT};")
+        else:
+            self.goal_label.setStyleSheet("")

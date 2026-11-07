@@ -25,6 +25,7 @@ class _StatCard(QFrame):
     def __init__(self, caption: str):
         super().__init__()
         self.setObjectName("stat_card")
+        theme.apply_card_shadow(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(4)
@@ -367,6 +368,13 @@ class StatsView(QWidget):
         return scroll
 
     # ---------- 概览 ----------
+    def _card(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("card")
+        theme.apply_card_shadow(frame)
+        return frame
+
+    # ---------- 概览 ----------
     def _build_overview_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -384,8 +392,7 @@ class StatsView(QWidget):
             cards.addWidget(c)
         layout.addLayout(cards)
 
-        chart_card = QFrame()
-        chart_card.setObjectName("card")
+        chart_card = self._card()
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(16, 12, 16, 10)
         chart_title = QLabel("近 30 天专注分钟")
@@ -395,8 +402,7 @@ class StatsView(QWidget):
         chart_layout.addWidget(self.bar_chart, stretch=1)
         layout.addWidget(chart_card, stretch=1)
 
-        reason_card = QFrame()
-        reason_card.setObjectName("card")
+        reason_card = self._card()
         reason_layout = QVBoxLayout(reason_card)
         reason_layout.setContentsMargins(16, 12, 16, 10)
         reason_title = QLabel("分心原因排行（近 30 天）")
@@ -406,8 +412,7 @@ class StatsView(QWidget):
         reason_layout.addWidget(self.reason_bars, stretch=1)
         layout.addWidget(reason_card, stretch=1)
 
-        app_card = QFrame()
-        app_card.setObjectName("card")
+        app_card = self._card()
         app_layout = QVBoxLayout(app_card)
         app_layout.setContentsMargins(16, 12, 16, 10)
         app_title = QLabel("专注期间应用使用 Top 8（近 30 天，按前台窗口时长统计）")
@@ -419,8 +424,7 @@ class StatsView(QWidget):
         app_layout.addWidget(self.app_bars, stretch=1)
         layout.addWidget(app_card, stretch=1)
 
-        category_card = QFrame()
-        category_card.setObjectName("card")
+        category_card = self._card()
         category_layout = QVBoxLayout(category_card)
         category_layout.setContentsMargins(16, 12, 16, 10)
         category_title = QLabel("计时分类分布（近 30 天专注分钟）")
@@ -454,8 +458,7 @@ class StatsView(QWidget):
         self.week_compare.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.week_compare)
 
-        chart_card = QFrame()
-        chart_card.setObjectName("card")
+        chart_card = self._card()
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(16, 12, 16, 10)
         chart_title = QLabel("近 8 周每周专注小时（横轴为周一起始日期）")
@@ -465,8 +468,7 @@ class StatsView(QWidget):
         chart_layout.addWidget(self.week_chart, stretch=1)
         layout.addWidget(chart_card, stretch=1)
 
-        heat_card = QFrame()
-        heat_card.setObjectName("card")
+        heat_card = self._card()
         heat_layout = QVBoxLayout(heat_card)
         heat_layout.setContentsMargins(16, 12, 16, 10)
         heat_title = QLabel("专注时段热力图（近 90 天，星期 × 小时，颜色越深专注越久）")
@@ -501,8 +503,7 @@ class StatsView(QWidget):
             cards.addWidget(c)
         layout.addLayout(cards)
 
-        detail_card = QFrame()
-        detail_card.setObjectName("card")
+        detail_card = self._card()
         detail_layout = QVBoxLayout(detail_card)
         detail_layout.setContentsMargins(16, 12, 16, 10)
         detail_title = QLabel("本周分心原因与计时分类")

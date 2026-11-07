@@ -48,7 +48,11 @@ class TreeWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        base_y = h - 26.0
+        # 树的完整高度（含花盆）随尺寸变化；卡片被拉高时垂直居中，不贴底
+        size = min(w, h) * 0.42 * (0.35, 0.6, 0.85, 1.15)[self._stage] \
+            * ((0.55 + 0.45 * self._grow) if self._running else 1.0)
+        needed = size * 1.45 + 22.0
+        base_y = min(h - 26.0, max((h + needed) / 2.0, size * 0.6))
         cx = w / 2.0
 
         # 地面阴影
@@ -72,10 +76,6 @@ class TreeWidget(QWidget):
         p.drawPath(path)
 
         sway = math.sin(self._t) * (4.0 if self._running else 1.2)
-        # 生长系数：闲置时按阶段展示；专注时从当前阶段的 55% 长到 100%
-        scale = (0.35, 0.6, 0.85, 1.15)[self._stage]
-        grow_factor = (0.55 + 0.45 * self._grow) if self._running else 1.0
-        size = min(w, h) * 0.42 * scale * grow_factor
 
         if self._stage == 0:
             self._draw_seed(p, cx, pot_top, size, sway)
