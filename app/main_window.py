@@ -11,7 +11,7 @@ import sys
 import time
 from datetime import date
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog,
                                QFileDialog, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QPushButton, QStackedWidget,
@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         self.data_dir = data_dir
         self.timer = PomodoroTimer()
         self.monitor = FrontendMonitor()
+        self.monitor.start(QThread.LowPriority)  # 常驻线程：专注期间采样前台窗口
         self.scheduler = ReminderScheduler(store)
         self.tray = TrayController(icons.load_app_icon(), self)
 
@@ -151,6 +152,7 @@ class MainWindow(QMainWindow):
         fv.skip_break_requested.connect(self._on_skip_break)
         fv.task_selected.connect(self._on_task_selected)
         fv.category_selected.connect(self._on_category_selected)
+        fv.duration_selected.connect(self._on_duration_selected)
         fv.noise_mixer_requested.connect(self._open_noise_mixer)
         fv.mini_requested.connect(self._toggle_mini)
         self._refresh_category_options()
@@ -281,7 +283,6 @@ class MainWindow(QMainWindow):
         self.session_id = None
         self.monitor.set_scanning(False)
         self.sound.stop_noise()
-        self.tray.notify("已记录一次分心", f"原因：{reason}。数据不会说谎，明天继续 💪")
         self._refresh_tree()
         self._update_tray()
         self._refresh_overlay()
@@ -373,6 +374,12 @@ class MainWindow(QMainWindow):
             pos = self._load_mini_pos()
             if pos:
                 self.overlay.move(pos[0], pos[1])
+            else:
+                # 首次打开默认屏幕正中（之后拖动位置自动记忆）
+                screen = QApplication.primaryScreen().availableGeometry()
+                self.overlay.move(
+                    screen.left() + (screen.width() - self.overlay.width()) // 2,
+                    screen.top() + (screen.height() - self.overlay.height()) // 2)
             self._refresh_overlay()
             self.overlay.show()
             # 迷你模式接管：主窗口隐藏，控制全部在迷你窗上进行
@@ -454,10 +461,6 @@ class MainWindow(QMainWindow):
             return
         if self.store.today_pomodoros() >= self.store.get_int("daily_goal", 6):
             self.store.set_setting("last_goal_date", today)
-            streak_days = gamify.streak(self.store.daily_pomodoros(400),
-                                        self.store.get_int("daily_goal", 6))
-            self.tray.notify("🎉 今日目标达成！",
-                             f"连击 {streak_days} 天，明天也要保持哦")
 
     # ================= 任务 =================
     def _refresh_tasks(self) -> None:
@@ -520,6 +523,14 @@ class MainWindow(QMainWindow):
             self.focus_view.category_combo.blockSignals(True)
             self.focus_view.category_combo.setCurrentIndex(index)
             self.focus_view.category_combo.blockSignals(False)
+
+    def _on_duration_selected(self, minutes: int) -> None:
+        """专注页手动设置"本次专注"时长：立即生效（设置页默认值不受影响）。"""
+        self.timer.durations[Phase.FOCUS] = float(minutes)
+        if not self.timer.running and not self.timer.paused:
+            planned = minutes * 60
+            self.focus_view.set_time(
+                self._fmt_remaining(planned), 0.0, Phase.FOCUS.value)
 
     # ================= 外观 / 提醒 =================
     def _on_theme_changed(self, name: str) -> None:
@@ -607,12 +618,11 @@ class MainWindow(QMainWindow):
         self._fg_samples = []
 
     def _on_blacklist_hit(self, process_name: str) -> None:
+        """黑名单命中：静默落库（统计页可见），不弹系统通知。"""
         if not (self.timer.running and self.timer.phase == Phase.FOCUS):
             return
         self.store.add_distraction(self.session_id,
                                    f"黑名单程序：{process_name}", "", "blacklist")
-        self.tray.notify("分心提醒",
-                         f"检测到你在用 {process_name}（黑名单），已如实记录 📝")
 
     # ================= 设置 =================
     def _apply_settings_to_runtime(self) -> None:
@@ -643,7 +653,6 @@ class MainWindow(QMainWindow):
         self._configure_break_reminder()
         self._refresh_gamify()
         self._on_state_changed()
-        self.tray.notify("设置已保存", "新配置立即生效")
 
     # ================= 托盘 / 窗口 =================
     def _update_tray(self, remaining_text: str | None = None) -> None:
@@ -743,7 +752,6 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self.store.backup_to(path)
-        self.tray.notify("备份完成", path)
 
     def _on_restore(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -814,7 +822,6 @@ class MainWindow(QMainWindow):
         self.current_task_id = self._load_current_task()
         self.refresh_all()
         self.stats_view.refresh()
-        self.tray.notify("已清空数据", "干干净净，重新开始 🌱")
 
     def _on_export_csv(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "选择导出位置")
@@ -839,7 +846,6 @@ class MainWindow(QMainWindow):
                 writer.writerow([row["id"], row["session_id"],
                                  _fmt_ts(row["ts"]), row["reason"],
                                  row["note"], row["source"]])
-        self.tray.notify("导出完成", f"已写入 {folder}")
 
     # ================= 其他 =================
     def _close_stale_session(self) -> None:

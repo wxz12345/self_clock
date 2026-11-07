@@ -71,7 +71,7 @@ class SoundPlayer(QObject):
 
     # ---------- 白噪音混音 ----------
     def set_noise_level(self, name: str, level: float) -> None:
-        """level 0~1；<=0 表示停掉该音色。"""
+        """level 0~1；<=0 表示停掉该音色（保留在混音列表，音量记 0）。"""
         if name not in NOISES:
             return
         level = max(0.0, min(1.0, level))
@@ -79,7 +79,7 @@ class SoundPlayer(QObject):
             track = self._tracks.get(name)
             if track:
                 track["player"].stop()
-            self._levels.pop(name, None)
+            self._levels[name] = 0.0
             return
         track = self._track(name)
         was_playing = self._levels.get(name, 0.0) > 0
@@ -94,9 +94,9 @@ class SoundPlayer(QObject):
             track["player"].play()
 
     def apply_mix(self, mix: dict) -> None:
-        """应用整套混音配置（不破坏正在播放的音色）。"""
-        for name in NOISES:
-            self.set_noise_level(name, float(mix.get(name, 0.0)))
+        """应用整套混音配置（只处理配置里出现的音色）。"""
+        for name, level in mix.items():
+            self.set_noise_level(name, float(level))
 
     def get_mix(self) -> dict:
         return dict(self._levels)
@@ -104,8 +104,15 @@ class SoundPlayer(QObject):
     def active_noises(self) -> list[str]:
         return [n for n, v in self._levels.items() if v > 0.001]
 
+    def remove_noise(self, name: str) -> None:
+        """从混音列表彻底移除音色（✕ 按钮）。"""
+        track = self._tracks.get(name)
+        if track:
+            track["player"].stop()
+        self._levels.pop(name, None)
+
     def stop_noise(self) -> None:
-        """停掉全部音色（不清空配置）。"""
+        """停掉全部音色播放（列表保留，音量记 0）。"""
         for name in list(self._levels):
             self.set_noise_level(name, 0.0)
 

@@ -59,7 +59,9 @@ class FrontendMonitor(QThread):
 
     def run(self) -> None:
         while not self._stop:
-            if self._scanning and self._blacklist:
+            if self._scanning:
+                # 只要专注会话进行中就采样前台窗口（应用使用统计），
+                # 黑名单命中判断在 _check_once 内部（黑名单为空时仅采样不告警）
                 self._check_once()
                 for _ in range(CHECK_INTERVAL_SEC * 10):
                     if self._stop:

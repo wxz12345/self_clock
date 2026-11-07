@@ -37,6 +37,8 @@ NOISE_ITEMS = [("🌧 雨声", "rain"), ("⛈ 雷雨", "thunder"), ("🌊 海浪
                ("🔥 篝火", "fire"), ("🍃 风声", "wind"), ("🐦 鸟鸣", "birds"),
                ("☕ 咖啡馆", "cafe"), ("🟤 棕噪音", "brown")]
 
+DURATION_PRESETS = [15, 25, 30, 45, 60, 90, 120]
+
 
 class FocusView(QWidget):
     start_requested = Signal()
@@ -46,6 +48,7 @@ class FocusView(QWidget):
     skip_break_requested = Signal()
     task_selected = Signal(object)  # task_id 或 None
     category_selected = Signal(str)  # 计时归类
+    duration_selected = Signal(int)  # 本次专注时长（分钟）
     noise_mixer_requested = Signal()
     mini_requested = Signal()
 
@@ -54,6 +57,7 @@ class FocusView(QWidget):
         self._primary_action_name = "start_focus"  # start_focus / start_break / resume
         self._updating_combo = False
         self._updating_category = False
+        self._updating_duration = False
 
         root = QHBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
@@ -85,15 +89,27 @@ class FocusView(QWidget):
 
         task_row = QHBoxLayout()
         task_row.addStretch(1)
+        task_row.addWidget(QLabel("本次专注"))
+        self.duration_combo = QComboBox()
+        self.duration_combo.setEditable(True)
+        self.duration_combo.setInsertPolicy(QComboBox.NoInsert)
+        for m in DURATION_PRESETS:
+            self.duration_combo.addItem(f"{m}", m)
+        self.duration_combo.setFixedWidth(76)
+        self.duration_combo.setValidator(self._minutes_validator())
+        self.duration_combo.currentIndexChanged.connect(self._on_duration_changed)
+        task_row.addWidget(self.duration_combo)
+        task_row.addWidget(QLabel("分钟"))
+        task_row.addSpacing(14)
         task_row.addWidget(QLabel("分类"))
         self.category_combo = QComboBox()
         self.category_combo.setMinimumWidth(96)
         self.category_combo.currentIndexChanged.connect(self._on_category_changed)
         task_row.addWidget(self.category_combo)
-        task_row.addSpacing(16)
+        task_row.addSpacing(14)
         task_row.addWidget(QLabel("当前任务"))
         self.task_combo = QComboBox()
-        self.task_combo.setMinimumWidth(220)
+        self.task_combo.setMinimumWidth(200)
         self.task_combo.currentIndexChanged.connect(self._on_task_changed)
         task_row.addWidget(self.task_combo)
         task_row.addStretch(1)
@@ -178,6 +194,33 @@ class FocusView(QWidget):
         self.update_state(Phase.FOCUS, running=False, paused=False)
 
     # ---------- 交互 ----------
+    def _minutes_validator(self):
+        from PySide6.QtGui import QIntValidator
+        v = QIntValidator(1, 180, self)
+        return v
+
+    def _on_duration_changed(self, index: int) -> None:
+        if self._updating_duration:
+            return
+        minutes = self.duration_combo.currentData()
+        if minutes is None:  # 手动输入的自定义值
+            try:
+                minutes = int(self.duration_combo.currentText())
+            except ValueError:
+                return
+        if 1 <= int(minutes) <= 180:
+            self.duration_selected.emit(int(minutes))
+
+    def set_duration(self, minutes: int) -> None:
+        """外部（设置/初始化）同步显示，不触发信号。"""
+        self._updating_duration = True
+        index = self.duration_combo.findData(minutes)
+        if index >= 0:
+            self.duration_combo.setCurrentIndex(index)
+        else:
+            self.duration_combo.setEditText(str(minutes))
+        self._updating_duration = False
+
     def _on_primary(self) -> None:
         {"start_focus": self.start_requested,
          "start_break": self.start_requested,

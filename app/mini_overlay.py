@@ -123,12 +123,13 @@ class MiniOverlay(QWidget):
         font.setPixelSize(24)
         font.setBold(True)
         p.setFont(font)
-        p.drawText(QRectF(0, 44, SIZE_W, 36), Qt.AlignHCenter | Qt.AlignVCenter,
+        # 时间严格画在圆环正中央
+        p.drawText(ring_rect, Qt.AlignHCenter | Qt.AlignVCenter,
                    self._time_text)
         p.setPen(QColor(theme.TEXT_DIM))
         small = QFont()
         small.setPixelSize(12)
         p.setFont(small)
-        p.drawText(QRectF(0, 84, SIZE_W, 20), Qt.AlignHCenter | Qt.AlignVCenter,
-                   self._label)
+        p.drawText(QRectF(0, ring_rect.bottom() + 2, SIZE_W, 20),
+                   Qt.AlignHCenter | Qt.AlignVCenter, self._label)
         p.end()

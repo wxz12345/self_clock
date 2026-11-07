@@ -49,12 +49,11 @@ class TimerRing(QWidget):
             p.setPen(pen)
             p.drawArc(ring_rect, 90 * 16, int(-360 * self._progress * 16))
 
-        # 居中剩余时间
+        # 剩余时间：严格画在圆环正中央
         p.setPen(QColor(theme.TEXT))
         font = QFont()
         font.setPixelSize(int(side * 0.21))
         font.setBold(True)
         p.setFont(font)
-        text_rect = QRectF(0, cy + side * 0.28, self.width(), side * 0.3)
-        p.drawText(text_rect, Qt.AlignHCenter | Qt.AlignVCenter, self._time_text)
+        p.drawText(ring_rect, Qt.AlignHCenter | Qt.AlignVCenter, self._time_text)
         p.end()
