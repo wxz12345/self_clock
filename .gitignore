@@ -1,0 +1,16 @@
+# 运行时数据（用户本地生成）
+data/
+backups/
+
+# Python
+__pycache__/
+*.pyc
+
+# 打包产物
+build/
+dist/
+*.spec
+
+# 预览与临时文件
+preview/
+.zcode/
