@@ -1,39 +1,141 @@
 # -*- coding: utf-8 -*-
-"""置顶迷你窗：无边框、始终置顶、可拖动的小控制窗。
+"""迷你窗双窗口结构：
+- MiniOverlay：纯视觉（卡片+圆环+时间），整窗点击穿透（WS_EX_TRANSPARENT），
+  可以直接点击它下面的窗口
+- MiniControls：按钮控制窗（状态条+按钮行），贴在视觉窗下方，可拖动/双击返回
 
-迷你模式下主窗口隐藏，开始/暂停/放弃/跳过全部在迷你窗上操作；
-双击背景或点 ⤢ 返回主窗口。位置在拖动结束时通知主窗口持久化。
+两个窗口位置联动，透明度只影响绘制内容，按钮始终不透明。
 """
-from PySide6.QtCore import QPoint, QRectF, Qt, Signal
+import ctypes
+import sys
+
+from PySide6.QtCore import QTimer, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton,
+                               QVBoxLayout, QWidget)
 
 from . import theme
 
 SIZE_W = 230
-SIZE_H = 232
+VISUAL_H = 186          # 视觉窗高度（卡片+圆环+时间）
+CONTROLS_H = 66         # 控制窗高度（状态条+按钮行）
+CONTROLS_OVERLAP = 8    # 两个窗口的拼接重叠
+RING_D = SIZE_W - 92
+RING_TOP = 14           # 圆环顶部位置（视觉窗内）
+
+IS_WINDOWS = sys.platform == "win32"
+
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x20
+WS_EX_LAYERED = 0x80000
+
+
+def _make_click_through(hwnd: int) -> None:
+    """给原生窗口加 WS_EX_TRANSPARENT：所有鼠标事件穿透到下层窗口。"""
+    import ctypes
+    user32 = ctypes.windll.user32
+    GWL_EXSTYLE = -20
+    style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+    user32.SetWindowLongPtrW(
+        hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
 
 
 class MiniOverlay(QWidget):
-    primary_requested = Signal()   # 开始/暂停/继续
-    abandon_requested = Signal()
-    skip_requested = Signal()
-    expand_requested = Signal()    # 返回主窗口
-    drag_finished = Signal()       # 拖动结束（主窗口保存位置）
+    """视觉窗：纯展示，全部点击穿透。"""
+
+    drag_finished = Signal()      # 控制窗拖动后通知保存（位置联动）
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
                             | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(SIZE_W, SIZE_H)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setFixedSize(SIZE_W, VISUAL_H)
         self._time_text = "--:--"
-        self._label = "待机"
         self._progress = 0.0
         self._color = theme.ACCENT
+        self._opacity = 1.0
+
+    def set_display(self, time_text: str, progress: float, phase_key: str) -> None:
+        self._time_text = time_text
+        self._progress = max(0.0, min(1.0, progress))
+        self._color = theme.PHASE_COLORS.get(phase_key, theme.ACCENT)
+        self.update()
+
+    def set_opacity(self, percent: int) -> None:
+        self._opacity = max(0.15, min(1.0, percent / 100.0))
+        self.update()
+
+    def enable_click_through(self) -> None:
+        """显示后调用：给原生窗口设置鼠标穿透扩展样式。"""
+        if IS_WINDOWS and self.isVisible():
+            _make_click_through(int(self.winId()))
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if IS_WINDOWS:
+            QTimer.singleShot(0, self.enable_click_through)
+
+    def paintEvent(self, event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        op = self._opacity
+        card = QColor(theme.OVERLAY[0], theme.OVERLAY[1], theme.OVERLAY[2],
+                      int(theme.OVERLAY[3] * op))
+        p.setPen(Qt.NoPen)
+        p.setBrush(card)
+        p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, VISUAL_H - 8), 18, 18)
+
+        ring_rect = QRectF((SIZE_W - RING_D) / 2, RING_TOP, RING_D, RING_D)
+        track = QPen(self._fade(QColor(theme.CARD_2)), 6)
+        track.setCapStyle(Qt.RoundCap)
+        p.setPen(track)
+        p.drawArc(ring_rect, 0, 360 * 16)
+        if self._progress > 0:
+            prog = self._fade(QColor(self._color))
+            pen = QPen(prog, 6)
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            p.drawArc(ring_rect, 90 * 16, int(-360 * self._progress * 16))
+
+        p.setPen(self._fade(QColor(theme.TEXT)))
+        font = QFont()
+        font.setPixelSize(24)
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(ring_rect, Qt.AlignHCenter | Qt.AlignVCenter,
+                   self._time_text)
+        p.end()
+
+    def _fade(self, color: QColor) -> QColor:
+        c = QColor(color)
+        c.setAlpha(max(0, min(255, int(c.alpha() * self._opacity))))
+        return c
+
+
+class MiniControls(QWidget):
+    """控制窗：状态条（拖动/双击返回）+ 按钮行。"""
+
+    primary_requested = Signal()
+    abandon_requested = Signal()
+    skip_requested = Signal()
+    expand_requested = Signal()
+    drag_finished = Signal()
+    opacity_selected = Signal(int)
+
+    ROW_H = 34
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+                            | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFixedSize(SIZE_W, CONTROLS_H)
+        self._opacity = 1.0
+        self._label = "待机"
         self._drag_offset: QPoint | None = None
 
-        # ----- 控制按钮 -----
         self.setStyleSheet("QPushButton { padding: 3px 8px; font-size: 12px; }")
         self.btn_primary = QPushButton("开始专注")
         self.btn_primary.setObjectName("primary")
@@ -48,33 +150,24 @@ class MiniOverlay(QWidget):
         self.btn_skip.setFixedHeight(30)
         self.btn_skip.clicked.connect(self.skip_requested.emit)
         self.btn_expand = QPushButton("返回")
-        self.btn_expand.setToolTip("返回主窗口（也可以双击迷你窗背景）")
+        self.btn_expand.setToolTip("返回主窗口（双击状态条或右键菜单也可以）")
         self.btn_expand.setFixedHeight(30)
         self.btn_expand.setFixedWidth(52)
         self.btn_expand.clicked.connect(self.expand_requested.emit)
 
         row = QHBoxLayout()
-        row.setContentsMargins(12, 0, 12, 0)
-        row.setSpacing(6)
+        row.setContentsMargins(10, 0, 10, 0)
+        row.setSpacing(5)
         row.addWidget(self.btn_primary, stretch=1)
         row.addWidget(self.btn_abandon)
         row.addWidget(self.btn_skip)
         row.addWidget(self.btn_expand)
 
-        from PySide6.QtWidgets import QVBoxLayout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 12)
-        layout.setSpacing(8)
-        layout.addStretch(1)          # 圆环区域（自绘）
+        layout.setContentsMargins(0, 2, 0, 4)
+        layout.setSpacing(2)
+        layout.addStretch(1)
         layout.addLayout(row)
-
-    def set_display(self, time_text: str, progress: float, phase_key: str,
-                    running: bool, label: str) -> None:
-        self._time_text = time_text
-        self._progress = max(0.0, min(1.0, progress))
-        self._color = theme.PHASE_COLORS.get(phase_key, theme.ACCENT)
-        self._label = label
-        self.update()
 
     def set_actions(self, primary_text: str, show_primary: bool,
                     show_abandon: bool, show_skip: bool) -> None:
@@ -83,7 +176,20 @@ class MiniOverlay(QWidget):
         self.btn_abandon.setVisible(show_abandon)
         self.btn_skip.setVisible(show_skip)
 
-    # ---------- 拖动（按钮以外区域） ----------
+    def set_state_label(self, label: str) -> None:
+        self._label = label
+        self.update()
+
+    def set_opacity(self, percent: int) -> None:
+        self._opacity = max(0.15, min(1.0, percent / 100.0))
+        self.update()
+
+    def _fade(self, color: QColor) -> QColor:
+        c = QColor(color)
+        c.setAlpha(max(0, min(255, int(c.alpha() * self._opacity))))
+        return c
+
+    # ---------- 拖动（整个控制窗背景即拖把；按钮自己处理点击） ----------
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._drag_offset = event.globalPosition().toPoint() - self.pos()
@@ -100,39 +206,37 @@ class MiniOverlay(QWidget):
     def mouseDoubleClickEvent(self, event) -> None:
         self.expand_requested.emit()
 
+    def contextMenuEvent(self, event) -> None:
+        menu = QMenu(self)
+        opacity_menu = menu.addMenu("透明度")
+        for pct in (25, 50, 75, 100):
+            act = opacity_menu.addAction(f"{pct}%")
+            act.setCheckable(True)
+            act.setChecked(int(self._opacity * 100) == pct)
+            act.triggered.connect(lambda _=False, p=pct: self._emit_opacity(p))
+        menu.addSeparator()
+        menu.addAction("返回主窗口", self.expand_requested.emit)
+        menu.exec(event.globalPos())
+
+    def _emit_opacity(self, pct: int) -> None:
+        self.set_opacity(pct)
+        self.opacity_selected.emit(pct)
+
     # ---------- 绘制 ----------
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        # 半透明圆角卡片（随主题）
+        op = self._opacity
+        card = QColor(theme.OVERLAY[0], theme.OVERLAY[1], theme.OVERLAY[2],
+                      int(theme.OVERLAY[3] * op))
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(*theme.OVERLAY))
-        p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, SIZE_H - 8), 18, 18)
+        p.setBrush(card)
+        p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, CONTROLS_H - 8), 14, 14)
 
-        ring_d = SIZE_W - 92
-        ring_rect = QRectF((SIZE_W - ring_d) / 2, 14, ring_d, ring_d)
-        track = QPen(QColor(theme.CARD_2), 6)
-        track.setCapStyle(Qt.RoundCap)
-        p.setPen(track)
-        p.drawArc(ring_rect, 0, 360 * 16)
-        if self._progress > 0:
-            pen = QPen(QColor(self._color), 6)
-            pen.setCapStyle(Qt.RoundCap)
-            p.setPen(pen)
-            p.drawArc(ring_rect, 90 * 16, int(-360 * self._progress * 16))
-
-        p.setPen(QColor(theme.TEXT))
-        font = QFont()
-        font.setPixelSize(24)
-        font.setBold(True)
-        p.setFont(font)
-        # 时间严格画在圆环正中央
-        p.drawText(ring_rect, Qt.AlignHCenter | Qt.AlignVCenter,
-                   self._time_text)
-        p.setPen(QColor(theme.TEXT_DIM))
+        p.setPen(self._fade(QColor(theme.TEXT_DIM)))
         small = QFont()
         small.setPixelSize(12)
         p.setFont(small)
-        p.drawText(QRectF(0, ring_rect.bottom() + 2, SIZE_W, 20),
-                   Qt.AlignHCenter | Qt.AlignVCenter, self._label)
+        p.drawText(QRectF(0, 6, SIZE_W, 18), Qt.AlignHCenter | Qt.AlignVCenter,
+                   self._label)
         p.end()

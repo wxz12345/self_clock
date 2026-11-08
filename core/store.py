@@ -25,6 +25,7 @@ DEFAULTS = {
     "white_noise": "off",       # 旧字段，保留兼容；混音器用 noise_mix
     "noise_mix": "",            # JSON {name: volume 0~1}
     "mini_pos": "",             # 迷你窗位置 "x,y"
+    "mini_opacity": "100",      # 迷你窗内容透明度百分比
     "theme": "dark",            # dark / light
     "categories": '["科研", "课程", "琐事", "娱乐", "休息"]',
     "last_category": "科研",

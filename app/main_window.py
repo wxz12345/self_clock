@@ -27,7 +27,7 @@ from . import icons, theme
 from .close_dialog import CloseDialog
 from .distraction_dialog import DistractionDialog
 from .focus_view import FocusView
-from .mini_overlay import MiniOverlay
+from .mini_overlay import CONTROLS_OVERLAP, MiniControls, MiniOverlay, VISUAL_H
 from .noise_mixer import NoiseMixerDialog
 from .reminder_popup import ReminderPopup
 from .reminders_view import RemindersView
@@ -358,8 +358,9 @@ class MainWindow(QMainWindow):
         if self.timer.running:
             self.focus_view.tree.set_state(self._tree_stage(), progress, True)
         if self.overlay is not None and self.overlay.isVisible():
-            self.overlay.set_display(text, progress, self.timer.phase.value,
-                                     True, self._mini_state_label(self.timer))
+            self.overlay.set_display(text, progress, self.timer.phase.value)
+            if self.mini_controls is not None:
+                self.mini_controls.set_state_label(self._mini_state_label(self.timer))
         self._update_tray(text)
 
     @staticmethod
@@ -385,14 +386,22 @@ class MainWindow(QMainWindow):
     def _toggle_mini(self) -> None:
         if self.overlay is None:
             self.overlay = MiniOverlay()
+            self.mini_controls = MiniControls()
             self.overlay.drag_finished.connect(self._save_mini_pos)
-            self.overlay.primary_requested.connect(self._tray_toggle)
-            self.overlay.abandon_requested.connect(self._on_abandon_requested)
-            self.overlay.skip_requested.connect(self._on_skip_break)
-            self.overlay.expand_requested.connect(self._expand_mini)
+            self.mini_controls.drag_finished.connect(self._save_mini_pos)
+            self.mini_controls.primary_requested.connect(self._tray_toggle)
+            self.mini_controls.abandon_requested.connect(self._on_abandon_requested)
+            self.mini_controls.skip_requested.connect(self._on_skip_break)
+            self.mini_controls.expand_requested.connect(self._expand_mini)
+            self.mini_controls.opacity_selected.connect(self._on_mini_opacity)
+            last_op = self.store.get_int("mini_opacity", 100)
+            self.overlay.set_opacity(last_op)
+            self.mini_controls.set_opacity(last_op)
         if self.overlay.isVisible():
             self._save_mini_pos()
             self.overlay.hide()
+            if self.mini_controls is not None:
+                self.mini_controls.hide()
             self.tray.act_mini.setText("显示迷你窗")
         else:
             pos = self._load_mini_pos()
@@ -404,8 +413,11 @@ class MainWindow(QMainWindow):
                 self.overlay.move(
                     screen.left() + (screen.width() - self.overlay.width()) // 2,
                     screen.top() + (screen.height() - self.overlay.height()) // 2)
+            self.mini_controls.move(self.overlay.x(),
+                                    self.overlay.y() + VISUAL_H - CONTROLS_OVERLAP)
             self._refresh_overlay()
             self.overlay.show()
+            self.mini_controls.show()
             # 迷你模式接管：主窗口隐藏，控制全部在迷你窗上进行
             self.hide()
             self.tray.act_mini.setText("隐藏迷你窗")
@@ -415,6 +427,8 @@ class MainWindow(QMainWindow):
         if self.overlay is not None:
             self._save_mini_pos()
             self.overlay.hide()
+            if self.mini_controls is not None:
+                self.mini_controls.hide()
             self.tray.act_mini.setText("显示迷你窗")
         self.showNormal()
 
@@ -429,10 +443,12 @@ class MainWindow(QMainWindow):
             progress = min(1.0, elapsed / (45 * 60))
             label = ("⏱ 顺计时中" if running else
                      ("已暂停" if self.stopwatch.elapsed_seconds() > 0 else "待机"))
-            self.overlay.set_display(text, progress, "stopwatch", running, label)
-            primary = "暂停" if running else ("继续" if self.stopwatch.elapsed_seconds() > 0 else "开始顺计时")
-            self.overlay.set_actions(primary, True, running or
-                                     self.stopwatch.elapsed_seconds() > 0, False)
+            self.overlay.set_display(text, progress, "stopwatch")
+            if self.mini_controls is not None:
+                self.mini_controls.set_state_label(label)
+                primary = "暂停" if running else ("继续" if self.stopwatch.elapsed_seconds() > 0 else "开始顺计时")
+                self.mini_controls.set_actions(primary, True, running or
+                                               self.stopwatch.elapsed_seconds() > 0, False)
             return
         t = self.timer
         if t.running:
@@ -445,8 +461,9 @@ class MainWindow(QMainWindow):
             planned = t.durations[t.phase] * 60
             text = self._fmt_remaining(planned)
             progress = 0.0
-        self.overlay.set_display(text, progress, t.phase.value, t.running,
-                                 self._mini_state_label(t))
+        self.overlay.set_display(text, progress, t.phase.value)
+        if self.mini_controls is not None:
+            self.mini_controls.set_state_label(self._mini_state_label(t))
         # 按钮状态（与专注页 update_state 一致的映射）
         if not t.running:
             primary = "开始专注" if t.phase == Phase.FOCUS else "开始休息"
@@ -457,7 +474,9 @@ class MainWindow(QMainWindow):
         else:
             primary, show_primary = "暂停", True
             show_abandon, show_skip = t.phase == Phase.FOCUS, t.phase.is_break
-        self.overlay.set_actions(primary, show_primary, show_abandon, show_skip)
+        if self.mini_controls is not None:
+            self.mini_controls.set_actions(primary, show_primary, show_abandon,
+                                           show_skip)
 
     def _save_mini_pos(self) -> None:
         if self.overlay is not None:
@@ -559,6 +578,9 @@ class MainWindow(QMainWindow):
             self.focus_view.category_combo.blockSignals(True)
             self.focus_view.category_combo.setCurrentIndex(index)
             self.focus_view.category_combo.blockSignals(False)
+
+    def _on_mini_opacity(self, percent: int) -> None:
+        self.store.set_setting("mini_opacity", percent)
 
     def _on_duration_selected(self, minutes: int) -> None:
         """专注页手动设置"本次专注"时长：立即反映到倒计时

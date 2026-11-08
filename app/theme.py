@@ -145,6 +145,10 @@ QPushButton {{
 }}
 QPushButton:hover {{ background: {p['BORDER']}; }}
 QPushButton:pressed {{ background: {p['BORDER']}; padding-top: 8px; padding-bottom: 6px; }}
+QPushButton:checked {{
+    background: {_rgba(p['ACCENT'], 0.22)}; border: 1px solid {p['ACCENT']};
+    color: {p['ACCENT']}; font-weight: bold;
+}}
 QPushButton:disabled {{ color: {p['TEXT_DIM']}; background: {p['CARD']}; }}
 QPushButton#primary {{
     background: {p['ACCENT']}; border: none; color: #ffffff; font-weight: bold;
