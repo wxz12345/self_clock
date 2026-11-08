@@ -1,6 +1,10 @@
-# 运行时数据（用户本地生成）
+# 运行时数据（用户本地生成，绝不入库）
 data/
 backups/
+*.db
+*.db-journal
+*.zip
+*.tmp
 
 # Python
 __pycache__/

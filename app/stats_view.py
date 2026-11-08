@@ -21,6 +21,12 @@ def _fmt_minutes(minutes: float) -> str:
     return f"{total // 60}h {total % 60:02d}m" if total >= 60 else f"{total} 分钟"
 
 
+def _fmt_usage(minutes: float) -> str:
+    """应用使用时长：不足 1 分钟显示秒，避免刚测试时看到「0 分钟」像没数据。"""
+    return (f"{max(1, int(round(minutes * 60)))} 秒" if minutes < 1
+            else f"{int(round(minutes))} 分钟")
+
+
 class _StatCard(QFrame):
     def __init__(self, caption: str):
         super().__init__()
@@ -420,7 +426,7 @@ class StatsView(QWidget):
         app_layout.addWidget(app_title)
         self.app_bars = ReasonBars(
             empty_text="还没有记录——完成一次专注就会看到你的时间去哪儿了",
-            value_fmt=lambda v: f"{int(round(v))} 分钟")
+            value_fmt=_fmt_usage)
         app_layout.addWidget(self.app_bars, stretch=1)
         layout.addWidget(app_card, stretch=1)
 

@@ -69,7 +69,18 @@ class MainWindow(QMainWindow):
         self._last_progress = 0.0
         self._really_quit = False
         self.overlay: MiniOverlay | None = None
-        self._fg_samples: list[tuple[float, str]] = []  # 专注期间前台进程采样
+        # 应用使用统计：当前会话的累计秒数。采样结果以「增量」周期性落库，
+        # 避免只在会话结束时一次性写入（顺计时/中途查看/异常退出都会丢数据）。
+        self._usage_session_id: int | None = None
+        self._usage_acc: dict[str, float] = {}
+        self._usage_last_name: str | None = None
+        self._usage_last_ts: float = 0.0
+
+        self._usage_flush_timer = QTimer(self)
+        self._usage_flush_timer.setInterval(60_000)
+        self._usage_flush_timer.timeout.connect(
+            lambda: self._flush_app_usage())
+        self._usage_flush_timer.start()
 
         self._reminder_timer = QTimer(self)
         self._configure_break_reminder()
@@ -205,6 +216,8 @@ class MainWindow(QMainWindow):
         if index == 2:
             self.reminders_view.refresh(self.store.get_reminders())
         elif index == 3:
+            # 先结算进行中会话的采样，统计页才能立刻看到「本次专注」
+            self._flush_app_usage(min_seconds=0.05)
             self.stats_view.refresh()
         elif index == 1:
             self._refresh_tasks()
@@ -221,7 +234,7 @@ class MainWindow(QMainWindow):
             self.session_id = self.store.start_session(
                 self.current_task_id, "focus", t.durations[Phase.FOCUS],
                 self.current_category)
-            self.monitor.set_scanning(True)
+            self._begin_usage_tracking()
             self.sound.apply_mix(self._load_mix())
         else:
             self.session_id = self.store.start_session(
@@ -304,9 +317,8 @@ class MainWindow(QMainWindow):
         self._pending_reason = None
         self.store.finish_session(self.session_id, "abandoned", elapsed_min)
         self.store.add_distraction(self.session_id, reason, note, "manual")
-        self._flush_app_usage()
+        self._end_usage_tracking()
         self.session_id = None
-        self.monitor.set_scanning(False)
         self.sound.stop_noise()
         self._refresh_tree()
         self._update_tray()
@@ -321,13 +333,12 @@ class MainWindow(QMainWindow):
             if self.session_id is not None:
                 self.store.finish_session(self.session_id, "completed",
                                           self.timer.durations[Phase.FOCUS])
-                self._flush_app_usage()
+            self._end_usage_tracking()
             if self.current_task_id:
                 self.store.increment_task_pomodoro(self.current_task_id)
             self.store.add_coins(gamify.COINS_PER_POMODORO, "完成番茄")
             self.sound.play("bell")
             self.sound.stop_noise()
-            self.monitor.set_scanning(False)
             self.tray.notify("🍅 番茄完成！", "干得漂亮，休息一下吧")
             self._check_daily_goal()
         else:
@@ -657,7 +668,7 @@ class MainWindow(QMainWindow):
             return
         self.session_id = self.store.start_session(
             self.current_task_id, "stopwatch", 0, self.current_category)
-        self.monitor.set_scanning(True)
+        self._begin_usage_tracking()
         self.sound.apply_mix(self._load_mix())
         self.stopwatch.start()
         self._refresh_overlay()
@@ -690,8 +701,8 @@ class MainWindow(QMainWindow):
             if self.current_task_id:
                 self.store.increment_task_pomodoro(self.current_task_id)
             self.store.add_coins(gamify.COINS_PER_POMODORO, "完成顺计时")
+        self._end_usage_tracking()
         self.session_id = None
-        self.monitor.set_scanning(False)
         self.sound.stop_noise()
         self._notify_stopwatch_done(minutes)
         self._refresh_tasks()
@@ -714,8 +725,8 @@ class MainWindow(QMainWindow):
                                           elapsed_min)
                 self.store.add_distraction(self.session_id, dialog.reason,
                                            dialog.note, "manual")
+            self._end_usage_tracking()
             self.session_id = None
-            self.monitor.set_scanning(False)
             self.sound.stop_noise()
             self._refresh_tree()
             self._update_tray()
@@ -788,36 +799,84 @@ class MainWindow(QMainWindow):
         self.reminders_view.refresh(self.store.get_reminders())
 
     # ================= 黑名单 / 应用使用 =================
-    def _on_fg_sample(self, process_name: str) -> None:
-        """专注会话期间（含暂停）的前台进程采样，用于应用使用统计。"""
-        if self.session_id is not None:
-            self._fg_samples.append((time.time(), process_name))
-
-    def _flush_app_usage(self) -> None:
-        """把采样聚合成每个进程的累计使用时长写入数据库。"""
-        if not self._fg_samples or self.session_id is None:
-            self._fg_samples = []
-            return
-        # 自身进程归类为应用名
+    @staticmethod
+    def _normalize_process_name(name: str) -> str:
+        """把自身进程（源码运行 / PyInstaller 打包）统一显示为应用名。"""
+        if not name:
+            return "未知应用"
         own_exe = os.path.basename(sys.executable).lower()
-        samples = self._fg_samples
-        avg_gap = (samples[-1][0] - samples[0][0]) / max(1, len(samples) - 1)
-        now = time.time()
-        agg: dict[str, float] = {}
-        for i, (t0, name) in enumerate(samples):
-            t1 = samples[i + 1][0] if i + 1 < len(samples) \
-                else min(now, t0 + max(avg_gap * 2, 1.0))
-            if name.lower() in ("pythonw.exe", "python.exe", own_exe):
-                name = "自律番茄钟"
-            agg[name] = agg.get(name, 0.0) + max(0.0, t1 - t0)
-        for name, seconds in agg.items():
-            if seconds >= 1.0:
+        if name.lower() in ("pythonw.exe", "python.exe",
+                            "selfclock.exe", own_exe):
+            return "自律番茄钟"
+        return name
+
+    def _begin_usage_tracking(self) -> None:
+        """开启一次专注会话的前台窗口采样（番茄 / 顺计时共用入口）。"""
+        self._usage_session_id = self.session_id
+        self._usage_acc.clear()
+        self._usage_last_name = None
+        self._usage_last_ts = time.monotonic()
+        self.monitor.set_scanning(True)
+
+    def _end_usage_tracking(self) -> None:
+        """关闭采样并做最终结算；必须在 session_id 置空之前调用。"""
+        self.monitor.set_scanning(False)
+        self._flush_app_usage(min_seconds=0.05)
+        self._usage_session_id = None
+
+    def _on_fg_sample(self, process_name: str, sampled_at: float) -> None:
+        """把「上一个采样点 → 本次」的真实时长记到上一个前台进程名下。
+
+        采样时刻由监控线程用 time.monotonic() 生成，因此主线程被模态弹窗
+        或事件循环阻塞、信号排队时，累计时长依然是真实的墙钟时间。
+        """
+        if (self.session_id is None
+                or self.session_id != self._usage_session_id):
+            return
+        name = self._normalize_process_name(process_name)
+        if sampled_at <= self._usage_last_ts:
+            # 采样在 flush 之前生成、却因信号排队滞后到达：这段时间已经
+            # 结算落库，只更新当前进程名，避免下一段把它重复计一次
+            self._usage_last_name = name
+            return
+        owner = self._usage_last_name or name
+        # 首个采样点把「会话开始 → 本次采样」也归给当前进程，不丢开头这段
+        self._usage_acc[owner] = (
+            self._usage_acc.get(owner, 0.0)
+            + max(0.0, sampled_at - self._usage_last_ts))
+        self._usage_last_name = name
+        self._usage_last_ts = sampled_at
+
+    def _flush_app_usage(self, min_seconds: float = 0.5) -> None:
+        """把累计时长以增量写入数据库；会话进行中也会被周期调用。
+
+        每次写入的是「距离上次 flush 的增量」，统计页用 SUM(seconds) 聚合，
+        因此反复调用不会重复计数。切到统计页 / 每 60 秒 / 会话结束 / 退出
+        都会触发，采样不再只停留在内存里。min_seconds 是写入门槛，
+        收尾场景放低到 0.05 秒，短会话的零头也能留下。
+        """
+        if (self.session_id is None
+                or self.session_id != self._usage_session_id):
+            return
+        now = time.monotonic()
+        if self._usage_last_name:
+            delta = max(0.0, now - self._usage_last_ts)
+            if delta:
+                self._usage_acc[self._usage_last_name] = (
+                    self._usage_acc.get(self._usage_last_name, 0.0) + delta)
+            # 从这一刻重新起算，下一段不会把已落库的时长重复计入
+            self._usage_last_ts = now
+        if not self._usage_acc:
+            return
+        for name, seconds in self._usage_acc.items():
+            if seconds >= min_seconds:
                 self.store.add_app_usage(self.session_id, name, seconds)
-        self._fg_samples = []
+        self._usage_acc.clear()
 
     def _on_blacklist_hit(self, process_name: str) -> None:
         """黑名单命中：静默落库（统计页可见），不弹系统通知。"""
-        if not (self.timer.running and self.timer.phase == Phase.FOCUS):
+        if (self.session_id is None
+                or self.session_id != self._usage_session_id):
             return
         self.store.add_distraction(self.session_id,
                                    f"黑名单程序：{process_name}", "", "blacklist")
@@ -917,6 +976,8 @@ class MainWindow(QMainWindow):
             if dialog.remember:
                 self.store.set_setting("close_action", action)
         if action == "tray":
+            # 最小化到托盘后专注仍在继续，先落一次增量，避免采样只留在内存
+            self._flush_app_usage()
             event.ignore()
             self.hide()          # 不再弹托盘提示，专注安静进行
             return
@@ -950,10 +1011,12 @@ class MainWindow(QMainWindow):
             elapsed_min = max(0.0, (planned_sec - t.remaining_seconds()) / 60)
             self.store.finish_session(self.session_id, "abandoned", elapsed_min)
             self.store.add_distraction(self.session_id, "退出应用", "", "manual")
-            self._flush_app_usage()
+            self._flush_app_usage(min_seconds=0.05)
         return True
 
     def _teardown(self) -> None:
+        # 兜底：顺计时进行中直接退出等场景，也把剩余采样结算落库
+        self._flush_app_usage(min_seconds=0.05)
         self.sound.stop_noise()
         self._save_mini_pos()
         if self.overlay is not None:
