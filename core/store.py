@@ -339,6 +339,109 @@ class Store:
         self.conn.close()
         shutil.copy2(path, self.db_path)
 
+    def merge_from(self, path: str) -> dict:
+        """把备份数据合并进当前库：id 全部重映射，按业务键去重，
+        设置不合并（保留当前）。返回各类新增条数。"""
+        b = sqlite3.connect(path)
+        b.row_factory = sqlite3.Row
+        stats = {"tasks": 0, "sessions": 0, "distractions": 0,
+                 "app_usage": 0, "reminders": 0, "coins": 0}
+
+        # ---- 任务（去重键：name + created_at）----
+        task_map = {}
+        for r in b.execute("SELECT * FROM tasks ORDER BY id"):
+            ex = self.conn.execute(
+                "SELECT id FROM tasks WHERE name=? AND created_at=?",
+                (r["name"], r["created_at"])).fetchone()
+            if ex:
+                task_map[r["id"]] = ex["id"]
+                continue
+            cur = self.conn.execute(
+                "INSERT INTO tasks(name, estimated, completed, done, created_at)"
+                " VALUES(?,?,?,?,?)",
+                (r["name"], r["estimated"], r["completed"], r["done"],
+                 r["created_at"]))
+            task_map[r["id"]] = cur.lastrowid
+            stats["tasks"] += 1
+
+        # ---- 会话（去重键：type + start_ts）----
+        sess_map = {}
+        for r in b.execute("SELECT * FROM sessions ORDER BY id"):
+            ex = self.conn.execute(
+                "SELECT id FROM sessions WHERE type=? AND start_ts=?",
+                (r["type"], r["start_ts"])).fetchone()
+            if ex:
+                sess_map[r["id"]] = ex["id"]
+                continue
+            cur = self.conn.execute(
+                "INSERT INTO sessions(task_id, type, start_ts, end_ts,"
+                " planned_min, actual_min, status, category)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (task_map.get(r["task_id"]), r["type"], r["start_ts"],
+                 r["end_ts"], r["planned_min"], r["actual_min"],
+                 r["status"], r["category"]))
+            sess_map[r["id"]] = cur.lastrowid
+            stats["sessions"] += 1
+
+        # ---- 分心（去重键：ts + reason + source）----
+        for r in b.execute("SELECT * FROM distractions ORDER BY id"):
+            if self.conn.execute(
+                    "SELECT 1 FROM distractions WHERE ts=? AND reason=?"
+                    " AND source=?",
+                    (r["ts"], r["reason"], r["source"])).fetchone():
+                continue
+            self.conn.execute(
+                "INSERT INTO distractions(session_id, ts, reason, note, source)"
+                " VALUES(?,?,?,?,?)",
+                (sess_map.get(r["session_id"]), r["ts"], r["reason"],
+                 r["note"], r["source"]))
+            stats["distractions"] += 1
+
+        # ---- 应用使用（去重键：ts + process）----
+        for r in b.execute("SELECT * FROM app_usage ORDER BY id"):
+            if self.conn.execute(
+                    "SELECT 1 FROM app_usage WHERE ts=? AND process=?",
+                    (r["ts"], r["process"])).fetchone():
+                continue
+            self.conn.execute(
+                "INSERT INTO app_usage(session_id, ts, process, seconds)"
+                " VALUES(?,?,?,?)",
+                (sess_map.get(r["session_id"]), r["ts"], r["process"],
+                 r["seconds"]))
+            stats["app_usage"] += 1
+
+        # ---- 提醒（去重键：title + remind_ts）----
+        for r in b.execute("SELECT * FROM reminders ORDER BY id"):
+            if self.conn.execute(
+                    "SELECT 1 FROM reminders WHERE title=? AND remind_ts=?",
+                    (r["title"], r["remind_ts"])).fetchone():
+                continue
+            self.conn.execute(
+                "INSERT INTO reminders(title, event_ts, location, note,"
+                " remind_ts, status, created_at) VALUES(?,?,?,?,?,?,?)",
+                (r["title"], r["event_ts"], r["location"], r["note"],
+                 r["remind_ts"], r["status"], r["created_at"]))
+            stats["reminders"] += 1
+
+        # ---- 金币流水（去重键：ts + amount + reason）；余额 = 当前 + 新增净额
+        net = 0
+        for r in b.execute("SELECT * FROM coins_log ORDER BY id"):
+            if self.conn.execute(
+                    "SELECT 1 FROM coins_log WHERE ts=? AND amount=? AND reason=?",
+                    (r["ts"], r["amount"], r["reason"])).fetchone():
+                continue
+            self.conn.execute(
+                "INSERT INTO coins_log(ts, amount, reason) VALUES(?,?,?)",
+                (r["ts"], r["amount"], r["reason"]))
+            net += r["amount"]
+            stats["coins"] += 1
+        if net:
+            self.set_setting("coins", self.get_coins() + net)
+
+        self.conn.commit()
+        b.close()
+        return stats
+
     def sessions_for_export(self):
         return self.conn.execute(
             "SELECT s.id, s.type, s.start_ts, s.end_ts, s.planned_min, "

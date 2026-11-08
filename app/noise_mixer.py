@@ -133,7 +133,8 @@ class NoiseMixerDialog(QDialog):
         remove_btn = QPushButton("×")
         remove_btn.setFixedSize(30, 30)
         remove_btn.setStyleSheet(
-            "color: #e06c5f; font-weight: bold; font-size: 15px;")
+            "QPushButton { color: #e06c5f; font-weight: bold; font-size: 15px;"
+            " padding: 2px; }")
         remove_btn.setToolTip("移除该音源")
         remove_btn.clicked.connect(lambda: self._on_remove(name))
         row.addWidget(label)
