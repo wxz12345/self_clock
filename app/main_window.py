@@ -27,7 +27,8 @@ from . import icons, theme
 from .close_dialog import CloseDialog
 from .distraction_dialog import DistractionDialog
 from .focus_view import FocusView
-from .mini_overlay import CONTROLS_OVERLAP, MiniControls, MiniOverlay, VISUAL_H
+from .mini_overlay import (CONTROLS_H, MiniControls, MiniOverlay,
+                           VISUAL_H)
 from .noise_mixer import NoiseMixerDialog
 from .reminder_popup import ReminderPopup
 from .reminders_view import RemindersView
@@ -387,7 +388,8 @@ class MainWindow(QMainWindow):
         if self.overlay is None:
             self.overlay = MiniOverlay()
             self.mini_controls = MiniControls()
-            self.mini_controls.drag_finished.connect(self._save_mini_pos)
+            self.overlay.grip_drag_moved.connect(self._on_mini_drag_moved)
+            self.overlay.grip_drag_finished.connect(self._save_mini_pos)
             self.mini_controls.primary_requested.connect(self._tray_toggle)
             self.mini_controls.abandon_requested.connect(self._on_abandon_requested)
             self.mini_controls.skip_requested.connect(self._on_skip_break)
@@ -413,7 +415,7 @@ class MainWindow(QMainWindow):
                     screen.left() + (screen.width() - self.overlay.width()) // 2,
                     screen.top() + (screen.height() - self.overlay.height()) // 2)
             self.mini_controls.move(self.overlay.x(),
-                                    self.overlay.y() + VISUAL_H - CONTROLS_OVERLAP)
+                                    self.overlay.y() + VISUAL_H)
             self._refresh_overlay()
             self.overlay.show()
             self.mini_controls.show()
@@ -476,6 +478,11 @@ class MainWindow(QMainWindow):
         if self.mini_controls is not None:
             self.mini_controls.set_actions(primary, show_primary, show_abandon,
                                            show_skip)
+
+    def _on_mini_drag_moved(self, pos) -> None:
+        """拖动视觉窗时联动移动控制窗。"""
+        if self.mini_controls is not None:
+            self.mini_controls.move(pos.x(), pos.y() + VISUAL_H)
 
     def _save_mini_pos(self) -> None:
         if self.overlay is not None:

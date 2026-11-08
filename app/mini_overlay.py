@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """迷你窗双窗口结构：
-- MiniOverlay：纯视觉（卡片+圆环+时间），整窗点击穿透（WS_EX_TRANSPARENT），
-  可以直接点击它下面的窗口
-- MiniControls：拖把条 + 状态标签 + 按钮行，贴在视觉窗下方
+- MiniOverlay：视觉窗（卡片+圆环+时间+拖拽把手）
+  圆环区域点击穿透（WM_NCHITTEST → HTTRANSPARENT），左上角把手可拖动整体
+- MiniControls：按钮行（暂停/放弃/跳过/返回），贴在视觉窗下方
 
-两个窗口位置联动，透明度只影响绘制内容，按钮始终不透明。
+拖动把手时两个窗口一起动；透明度只影响绘制内容，按钮始终不透明。
 """
 import ctypes
 import sys
@@ -17,42 +17,47 @@ from PySide6.QtWidgets import (QHBoxLayout, QMenu, QPushButton,
 from . import theme
 
 SIZE_W = 230
-VISUAL_H = 168          # 视觉窗高度（卡片+圆环+时间）
-CONTROLS_H = 78         # 控制窗高度（拖把条+状态标签+按钮行）
-CONTROLS_OVERLAP = 6    # 两个窗口的拼接重叠
+VISUAL_H = 168          # 视觉窗高度（卡片+圆环+把手）
+CONTROLS_H = 44         # 控制窗高度（按钮行）
+CONTROLS_OVERLAP = 0    # 两窗口紧贴不留缝
 RING_D = SIZE_W - 92
-RING_TOP = 12           # 圆环顶部位置（视觉窗内）
-GRIP_H = 18             # 拖把条高度（控制窗内）
+RING_TOP = 26           # 圆环顶部（视觉窗内，给把手留出空间）
+GRIP_SIZE = 26          # 把手区域大小（左上角正方形）
 
 IS_WINDOWS = sys.platform == "win32"
 
 GWL_EXSTYLE = -20
-WS_EX_TRANSPARENT = 0x20
 WS_EX_LAYERED = 0x80000
+WM_NCHITTEST = 0x0084
+HTTRANSPARENT = -1
 
 
-def _make_click_through(hwnd: int) -> None:
-    """给原生窗口加 WS_EX_TRANSPARENT：所有鼠标事件穿透到下层窗口。"""
+def _set_click_through(hwnd: int) -> None:
+    """给原生窗口加 WS_EX_LAYERED（配合 Qt 的 TranslucentBackground）。
+    注意：不用 WS_EX_TRANSPARENT，因为我们需要接收部分区域的鼠标事件，
+    穿透逻辑由 nativeEvent 的 WM_NCHITTEST 处理。"""
     user32 = ctypes.windll.user32
     style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongPtrW(
-        hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
+    user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
 
 
 class MiniOverlay(QWidget):
-    """视觉窗：纯展示，全部点击穿透。"""
+    """视觉窗：圆环 + 时间 + 左上角拖拽把手。圆环区域点击穿透。"""
+
+    grip_drag_moved = Signal(QPoint)   # 拖动中（全局坐标）
+    grip_drag_finished = Signal()      # 拖动结束
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
                             | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setFixedSize(SIZE_W, VISUAL_H)
         self._time_text = "--:--"
         self._progress = 0.0
         self._color = theme.ACCENT
         self._opacity = 1.0
+        self._drag_offset: QPoint | None = None
 
     def set_display(self, time_text: str, progress: float,
                     phase_key: str) -> None:
@@ -66,14 +71,54 @@ class MiniOverlay(QWidget):
         self.update()
 
     def enable_click_through(self) -> None:
+        """显示后调用：设置 WS_EX_LAYERED 让 WM_NCHITTEST 生效。"""
         if IS_WINDOWS and self.isVisible():
-            _make_click_through(int(self.winId()))
+            _set_click_through(int(self.winId()))
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if IS_WINDOWS:
             QTimer.singleShot(0, self.enable_click_through)
 
+    # ---------- 拖拽把手（左上角） ----------
+    def _in_grip(self, pos: QPoint) -> bool:
+        return pos.x() <= GRIP_SIZE and pos.y() <= GRIP_SIZE
+
+    def _in_ring(self, pos: QPoint) -> bool:
+        ring_cx = SIZE_W / 2
+        ring_cy = RING_TOP + RING_D / 2
+        dist_sq = (pos.x() - ring_cx) ** 2 + (pos.y() - ring_cy) ** 2
+        return dist_sq <= (RING_D / 2 + 8) ** 2   # 8px 容差
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self._in_grip(event.position().toPoint()):
+            self._drag_offset = (event.globalPosition().toPoint() - self.pos())
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_offset is not None:
+            new_pos = event.globalPosition().toPoint() - self._drag_offset
+            self.move(new_pos)
+            self.grip_drag_moved.emit(new_pos)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._drag_offset is not None:
+            self._drag_offset = None
+            self.grip_drag_finished.emit()
+
+    # ---------- 点击穿透（圆环区域透到下层，把手区域正常拖动） ----------
+    def nativeEvent(self, eventType, message):
+        if eventType == b"windows_generic_MSG":
+            msg = ctypes.wintypes.MSG.from_address(int(message))
+            if msg.message == WM_NCHITTEST:
+                x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                pos = self.mapFromGlobal(QPoint(x, y))
+                if self._in_ring(pos):
+                    return True, HTTRANSPARENT
+                # 把手和其余区域正常处理
+        return super().nativeEvent(eventType, message)
+
+    # ---------- 绘制 ----------
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -83,6 +128,13 @@ class MiniOverlay(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(card)
         p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, VISUAL_H - 8), 18, 18)
+
+        # 拖拽把手：左上角竖排三粒圆点
+        p.setPen(Qt.NoPen)
+        dot = self._fade(QColor(theme.TEXT_DIM))
+        p.setBrush(dot)
+        for dy in (-7, 0, 7):
+            p.drawEllipse(QPointF(13, 26 + dy), 2.5, 2.5)
 
         ring_rect = QRectF((SIZE_W - RING_D) / 2, RING_TOP, RING_D, RING_D)
         track = QPen(self._fade(QColor(theme.CARD_2)), 6)
@@ -112,13 +164,12 @@ class MiniOverlay(QWidget):
 
 
 class MiniControls(QWidget):
-    """控制窗：拖把条（拖动）+ 状态标签 + 按钮行。"""
+    """控制窗：状态标签 + 按钮行（暂停/放弃/跳过/返回）。"""
 
     primary_requested = Signal()
     abandon_requested = Signal()
     skip_requested = Signal()
     expand_requested = Signal()
-    drag_finished = Signal()
     opacity_selected = Signal(int)
 
     def __init__(self, parent=None):
@@ -129,7 +180,6 @@ class MiniControls(QWidget):
         self.setFixedSize(SIZE_W, CONTROLS_H)
         self._opacity = 1.0
         self._label = "待机"
-        self._drag_offset: QPoint | None = None
 
         self.setStyleSheet("QPushButton { padding: 3px 8px; font-size: 12px; }")
         self.btn_primary = QPushButton("开始专注")
@@ -145,7 +195,7 @@ class MiniControls(QWidget):
         self.btn_skip.setFixedHeight(30)
         self.btn_skip.clicked.connect(self.skip_requested.emit)
         self.btn_expand = QPushButton("返回")
-        self.btn_expand.setToolTip("返回主窗口（双击拖把条或右键菜单也可以）")
+        self.btn_expand.setToolTip("返回主窗口")
         self.btn_expand.setFixedHeight(30)
         self.btn_expand.setFixedWidth(52)
         self.btn_expand.clicked.connect(self.expand_requested.emit)
@@ -159,8 +209,7 @@ class MiniControls(QWidget):
         row.addWidget(self.btn_expand)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, GRIP_H + 4, 0, 4)
-        layout.setSpacing(0)
+        layout.setContentsMargins(0, 4, 0, 4)
         layout.addLayout(row)
 
     def set_actions(self, primary_text: str, show_primary: bool,
@@ -178,45 +227,6 @@ class MiniControls(QWidget):
         self._opacity = max(0.15, min(1.0, percent / 100.0))
         self.update()
 
-    def _fade(self, color: QColor) -> QColor:
-        c = QColor(color)
-        c.setAlpha(max(0, min(255, int(c.alpha() * self._opacity))))
-        return c
-
-    # ---------- 拖动（整个控制窗背景即拖把；按钮自己处理点击） ----------
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.pos()
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._drag_offset is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-
-    def mouseReleaseEvent(self, event) -> None:
-        if self._drag_offset is not None:
-            self._drag_offset = None
-            self.drag_finished.emit()
-
-    def mouseDoubleClickEvent(self, event) -> None:
-        self.expand_requested.emit()
-
-    def contextMenuEvent(self, event) -> None:
-        menu = QMenu(self)
-        opacity_menu = menu.addMenu("透明度")
-        for pct in (25, 50, 75, 100):
-            act = opacity_menu.addAction(f"{pct}%")
-            act.setCheckable(True)
-            act.setChecked(int(self._opacity * 100) == pct)
-            act.triggered.connect(lambda _=False, p=pct: self._emit_opacity(p))
-        menu.addSeparator()
-        menu.addAction("返回主窗口", self.expand_requested.emit)
-        menu.exec(event.globalPos())
-
-    def _emit_opacity(self, pct: int) -> None:
-        self.set_opacity(pct)
-        self.opacity_selected.emit(pct)
-
-    # ---------- 绘制 ----------
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -227,10 +237,10 @@ class MiniControls(QWidget):
         p.setBrush(card)
         p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, CONTROLS_H - 8), 14, 14)
 
-        p.setPen(self._fade(QColor(theme.TEXT_DIM)))
+        p.setPen(QColor(theme.TEXT_DIM))
         small = QFont()
         small.setPixelSize(12)
         p.setFont(small)
-        p.drawText(QRectF(0, GRIP_H, SIZE_W, 18),
+        p.drawText(QRectF(0, 4, SIZE_W, CONTROLS_H - 8),
                    Qt.AlignHCenter | Qt.AlignVCenter, self._label)
         p.end()
