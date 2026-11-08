@@ -387,7 +387,6 @@ class MainWindow(QMainWindow):
         if self.overlay is None:
             self.overlay = MiniOverlay()
             self.mini_controls = MiniControls()
-            self.overlay.drag_finished.connect(self._save_mini_pos)
             self.mini_controls.drag_finished.connect(self._save_mini_pos)
             self.mini_controls.primary_requested.connect(self._tray_toggle)
             self.mini_controls.abandon_requested.connect(self._on_abandon_requested)

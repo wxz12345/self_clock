@@ -2,26 +2,27 @@
 """迷你窗双窗口结构：
 - MiniOverlay：纯视觉（卡片+圆环+时间），整窗点击穿透（WS_EX_TRANSPARENT），
   可以直接点击它下面的窗口
-- MiniControls：按钮控制窗（状态条+按钮行），贴在视觉窗下方，可拖动/双击返回
+- MiniControls：拖把条 + 状态标签 + 按钮行，贴在视觉窗下方
 
 两个窗口位置联动，透明度只影响绘制内容，按钮始终不透明。
 """
 import ctypes
 import sys
 
-from PySide6.QtCore import QTimer, QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import (QPointF, QTimer, QPoint, QRectF, Qt, Signal)
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton,
+from PySide6.QtWidgets import (QHBoxLayout, QMenu, QPushButton,
                                QVBoxLayout, QWidget)
 
 from . import theme
 
 SIZE_W = 230
-VISUAL_H = 186          # 视觉窗高度（卡片+圆环+时间）
-CONTROLS_H = 66         # 控制窗高度（状态条+按钮行）
-CONTROLS_OVERLAP = 8    # 两个窗口的拼接重叠
+VISUAL_H = 168          # 视觉窗高度（卡片+圆环+时间）
+CONTROLS_H = 78         # 控制窗高度（拖把条+状态标签+按钮行）
+CONTROLS_OVERLAP = 6    # 两个窗口的拼接重叠
 RING_D = SIZE_W - 92
-RING_TOP = 14           # 圆环顶部位置（视觉窗内）
+RING_TOP = 12           # 圆环顶部位置（视觉窗内）
+GRIP_H = 18             # 拖把条高度（控制窗内）
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -32,9 +33,7 @@ WS_EX_LAYERED = 0x80000
 
 def _make_click_through(hwnd: int) -> None:
     """给原生窗口加 WS_EX_TRANSPARENT：所有鼠标事件穿透到下层窗口。"""
-    import ctypes
     user32 = ctypes.windll.user32
-    GWL_EXSTYLE = -20
     style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
     user32.SetWindowLongPtrW(
         hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
@@ -42,8 +41,6 @@ def _make_click_through(hwnd: int) -> None:
 
 class MiniOverlay(QWidget):
     """视觉窗：纯展示，全部点击穿透。"""
-
-    drag_finished = Signal()      # 控制窗拖动后通知保存（位置联动）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,7 +54,8 @@ class MiniOverlay(QWidget):
         self._color = theme.ACCENT
         self._opacity = 1.0
 
-    def set_display(self, time_text: str, progress: float, phase_key: str) -> None:
+    def set_display(self, time_text: str, progress: float,
+                    phase_key: str) -> None:
         self._time_text = time_text
         self._progress = max(0.0, min(1.0, progress))
         self._color = theme.PHASE_COLORS.get(phase_key, theme.ACCENT)
@@ -68,7 +66,6 @@ class MiniOverlay(QWidget):
         self.update()
 
     def enable_click_through(self) -> None:
-        """显示后调用：给原生窗口设置鼠标穿透扩展样式。"""
         if IS_WINDOWS and self.isVisible():
             _make_click_through(int(self.winId()))
 
@@ -115,7 +112,7 @@ class MiniOverlay(QWidget):
 
 
 class MiniControls(QWidget):
-    """控制窗：状态条（拖动/双击返回）+ 按钮行。"""
+    """控制窗：拖把条（拖动）+ 状态标签 + 按钮行。"""
 
     primary_requested = Signal()
     abandon_requested = Signal()
@@ -123,8 +120,6 @@ class MiniControls(QWidget):
     expand_requested = Signal()
     drag_finished = Signal()
     opacity_selected = Signal(int)
-
-    ROW_H = 34
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -150,7 +145,7 @@ class MiniControls(QWidget):
         self.btn_skip.setFixedHeight(30)
         self.btn_skip.clicked.connect(self.skip_requested.emit)
         self.btn_expand = QPushButton("返回")
-        self.btn_expand.setToolTip("返回主窗口（双击状态条或右键菜单也可以）")
+        self.btn_expand.setToolTip("返回主窗口（双击拖把条或右键菜单也可以）")
         self.btn_expand.setFixedHeight(30)
         self.btn_expand.setFixedWidth(52)
         self.btn_expand.clicked.connect(self.expand_requested.emit)
@@ -164,9 +159,8 @@ class MiniControls(QWidget):
         row.addWidget(self.btn_expand)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 4)
-        layout.setSpacing(2)
-        layout.addStretch(1)
+        layout.setContentsMargins(0, GRIP_H + 4, 0, 4)
+        layout.setSpacing(0)
         layout.addLayout(row)
 
     def set_actions(self, primary_text: str, show_primary: bool,
@@ -237,6 +231,6 @@ class MiniControls(QWidget):
         small = QFont()
         small.setPixelSize(12)
         p.setFont(small)
-        p.drawText(QRectF(0, 6, SIZE_W, 18), Qt.AlignHCenter | Qt.AlignVCenter,
-                   self._label)
+        p.drawText(QRectF(0, GRIP_H, SIZE_W, 18),
+                   Qt.AlignHCenter | Qt.AlignVCenter, self._label)
         p.end()
