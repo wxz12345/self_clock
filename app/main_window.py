@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog,
 from core import autostart, gamify
 from core.monitor import FrontendMonitor
 from core.reminder import ReminderScheduler
+from core.stopwatch import Stopwatch
 from core.timer import Phase, PomodoroTimer
 
 from . import icons, theme
@@ -55,6 +56,8 @@ class MainWindow(QMainWindow):
         self.timer = PomodoroTimer()
         self.monitor = FrontendMonitor()
         self.monitor.start(QThread.LowPriority)  # 常驻线程：专注期间采样前台窗口
+        self.stopwatch = Stopwatch()
+        self.stopwatch_mode = store.get_setting("timer_mode", "pomodoro") == "stopwatch"
         self.scheduler = ReminderScheduler(store)
         self.tray = TrayController(icons.load_app_icon(), self)
 
@@ -72,6 +75,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._connect_signals()
+        self.focus_view.set_mode("stopwatch" if self.stopwatch_mode else "pomodoro")
         self._apply_settings_to_runtime()
         self._close_stale_session()
         self.refresh_all()
@@ -153,6 +157,10 @@ class MainWindow(QMainWindow):
         fv.task_selected.connect(self._on_task_selected)
         fv.category_selected.connect(self._on_category_selected)
         fv.duration_selected.connect(self._on_duration_selected)
+        fv.mode_selected.connect(self._on_mode_selected)
+        fv.stop_requested.connect(self._on_stopwatch_stop)
+        self.stopwatch.tick.connect(self._on_stopwatch_tick)
+        self.stopwatch.state_changed.connect(self._on_stopwatch_state)
         fv.noise_mixer_requested.connect(self._open_noise_mixer)
         fv.mini_requested.connect(self._toggle_mini)
         self._refresh_category_options()
@@ -202,6 +210,9 @@ class MainWindow(QMainWindow):
 
     # ================= 番茄钟流转 =================
     def _on_start_requested(self) -> None:
+        if self.stopwatch_mode:
+            self._on_stopwatch_start()
+            return
         t = self.timer
         if t.running:
             return
@@ -220,10 +231,20 @@ class MainWindow(QMainWindow):
         self._refresh_overlay()
 
     def _do_pause(self) -> None:
+        if self.stopwatch_mode:
+            self.stopwatch.pause()
+            self.sound.pause_noise()
+            self._refresh_overlay()
+            return
         self.timer.pause()
         self.sound.pause_noise()
 
     def _do_resume(self) -> None:
+        if self.stopwatch_mode:
+            self.stopwatch.resume()
+            self.sound.resume_noise()
+            self._refresh_overlay()
+            return
         self.timer.resume()
         self.sound.resume_noise()
 
@@ -258,6 +279,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_abandon_requested(self) -> None:
+        if self.stopwatch_mode:
+            self._on_stopwatch_abandon()
+            return
         t = self.timer
         if t.phase != Phase.FOCUS or not t.running:
             return
@@ -398,6 +422,18 @@ class MainWindow(QMainWindow):
         """按当前计时器状态刷新迷你窗的时间与按钮（所有状态变化后调用）。"""
         if self.overlay is None:
             return
+        if self.stopwatch_mode:
+            elapsed = self.stopwatch.elapsed_seconds()
+            running = self.stopwatch.running
+            text = self.focus_view._fmt_elapsed(elapsed)
+            progress = min(1.0, elapsed / (45 * 60))
+            label = ("⏱ 顺计时中" if running else
+                     ("已暂停" if self.stopwatch.elapsed_seconds() > 0 else "待机"))
+            self.overlay.set_display(text, progress, "stopwatch", running, label)
+            primary = "暂停" if running else ("继续" if self.stopwatch.elapsed_seconds() > 0 else "开始顺计时")
+            self.overlay.set_actions(primary, True, running or
+                                     self.stopwatch.elapsed_seconds() > 0, False)
+            return
         t = self.timer
         if t.running:
             text = self._fmt_remaining(t.remaining_seconds())
@@ -535,6 +571,101 @@ class MainWindow(QMainWindow):
         if self.overlay is not None and self.overlay.isVisible():
             self._refresh_overlay()
 
+    # ================= 顺计时 =================
+    def _on_mode_selected(self, mode: str) -> None:
+        """番茄/顺计时 切换：仅待机时允许（运行中按钮已禁用）。"""
+        busy = self.timer.running or self.timer.paused or self.stopwatch.running
+        if busy or mode == self.stopwatch_mode:
+            # 恢复按钮勾选状态
+            self.focus_view.set_mode(self.stopwatch_mode)
+            return
+        self.stopwatch_mode = (mode == "stopwatch")
+        self.store.set_setting("timer_mode", mode)
+        self.focus_view.set_mode(mode)
+        if mode == "pomodoro":
+            planned = self.timer.durations[Phase.FOCUS] * 60
+            self.focus_view.set_time(self._fmt_remaining(planned), 0.0,
+                                     Phase.FOCUS.value)
+            self._refresh_tree()
+
+    def _on_stopwatch_start(self) -> None:
+        if self.stopwatch.running:
+            return
+        self.session_id = self.store.start_session(
+            self.current_task_id, "stopwatch", 0, self.current_category)
+        self.monitor.set_scanning(True)
+        self.sound.apply_mix(self._load_mix())
+        self.stopwatch.start()
+        self._refresh_overlay()
+        self._update_tray()
+
+    def _on_stopwatch_tick(self, elapsed: float) -> None:
+        text = self.focus_view._fmt_elapsed(elapsed)
+        self.focus_view.set_time(text, min(1.0, elapsed / (45 * 60)),
+                                 "stopwatch")
+        self.focus_view.tree.set_state(self._tree_stage(),
+                                       min(1.0, elapsed / (45 * 60)), True)
+        if self.overlay is not None and self.overlay.isVisible():
+            self.overlay.set_display(text, min(1.0, elapsed / (45 * 60)),
+                                     "stopwatch", True, "⏱ 顺计时中")
+        self._update_tray(f"⏱ {int(elapsed // 60):02d}:{int(elapsed) % 60:02d}")
+
+    def _on_stopwatch_state(self) -> None:
+        elapsed = self.stopwatch.elapsed_seconds()
+        running = self.stopwatch.running
+        paused = (not running and elapsed > 0)
+        self.focus_view.set_stopwatch(elapsed, running, paused)
+        self._refresh_overlay()
+        self._update_tray()
+
+    def _on_stopwatch_stop(self) -> None:
+        """停止并记录本次顺计时。"""
+        minutes = self.stopwatch.stop()
+        if self.session_id is not None:
+            self.store.finish_session(self.session_id, "completed", minutes)
+            if self.current_task_id:
+                self.store.increment_task_pomodoro(self.current_task_id)
+            self.store.add_coins(gamify.COINS_PER_POMODORO, "完成顺计时")
+        self.session_id = None
+        self.monitor.set_scanning(False)
+        self.sound.stop_noise()
+        self._notify_stopwatch_done(minutes)
+        self._refresh_tasks()
+        self._refresh_gamify()
+        self._refresh_tree()
+        self._update_tray()
+        self._refresh_overlay()
+
+    def _on_stopwatch_abandon(self) -> None:
+        """顺计时放弃：暂停 → 弹窗 → 确认则丢弃，取消则继续。"""
+        was_running = self.stopwatch.running
+        self.stopwatch.pause()
+        if not self.isVisible():
+            self.showNormal()
+        dialog = DistractionDialog(self)
+        if dialog.exec() == DistractionDialog.Accepted:
+            elapsed_min = self.stopwatch.stop()
+            if self.session_id is not None:
+                self.store.finish_session(self.session_id, "abandoned",
+                                          elapsed_min)
+                self.store.add_distraction(self.session_id, dialog.reason,
+                                           dialog.note, "manual")
+            self.session_id = None
+            self.monitor.set_scanning(False)
+            self.sound.stop_noise()
+            self._refresh_tree()
+            self._update_tray()
+            self._refresh_overlay()
+        else:
+            if was_running:
+                self.stopwatch.resume()
+            else:
+                self.stopwatch.pause()
+
+    def _notify_stopwatch_done(self, minutes: float) -> None:
+        self.sound.play("bell")
+        self.tray.notify("⏱ 顺计时完成", f"本次 {int(minutes)} 分钟，已记录")
+
     # ================= 外观 / 提醒 =================
     def _on_theme_changed(self, name: str) -> None:
         theme.set_theme(name)
@@ -660,6 +791,19 @@ class MainWindow(QMainWindow):
 
     # ================= 托盘 / 窗口 =================
     def _update_tray(self, remaining_text: str | None = None) -> None:
+        if self.stopwatch_mode:
+            elapsed = self.stopwatch.elapsed_seconds()
+            if self.stopwatch.running:
+                mm, ss = int(elapsed // 60), int(elapsed) % 60
+                self.tray.update_timer_tooltip(f"自律番茄钟 - 顺计时 {mm:02d}:{ss:02d}")
+                self.tray.act_toggle.setText("暂停")
+            elif elapsed > 0:
+                self.tray.update_timer_tooltip("自律番茄钟 - 顺计时已暂停")
+                self.tray.act_toggle.setText("继续")
+            else:
+                self.tray.update_timer_tooltip("自律番茄钟 - 待机中")
+                self.tray.act_toggle.setText("开始顺计时")
+            return
         t = self.timer
         if t.running:
             if remaining_text is None:
@@ -675,6 +819,16 @@ class MainWindow(QMainWindow):
             self.tray.act_toggle.setText("开始专注")
 
     def _tray_toggle(self) -> None:
+        if self.stopwatch_mode:
+            if self.stopwatch.running or self.stopwatch.elapsed_seconds() > 0:
+                if self.stopwatch.running:
+                    self.stopwatch.pause()
+                else:
+                    self.stopwatch.resume()
+            else:
+                self._on_stopwatch_start()
+            self._update_tray()
+            return
         t = self.timer
         if t.running:
             self._do_pause()

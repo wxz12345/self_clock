@@ -63,6 +63,7 @@ PHASE_COLORS = {
     "focus": FOCUS_COLOR,
     "short_break": SHORT_BREAK_COLOR,
     "long_break": LONG_BREAK_COLOR,
+    "stopwatch": GOLD,
 }
 
 
@@ -80,6 +81,7 @@ def set_theme(name: str) -> None:
         "focus": P["FOCUS_COLOR"],
         "short_break": P["SHORT_BREAK_COLOR"],
         "long_break": P["LONG_BREAK_COLOR"],
+        "stopwatch": P["GOLD"],
     }
     globals()["PHASE_COLORS"] = PHASE_COLORS
 

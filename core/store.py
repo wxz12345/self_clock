@@ -28,6 +28,7 @@ DEFAULTS = {
     "theme": "dark",            # dark / light
     "categories": '["科研", "课程", "琐事", "娱乐", "休息"]',
     "last_category": "科研",
+    "timer_mode": "pomodoro",       # pomodoro / stopwatch
     "break_reminder_enabled": "0",   # 规律性久坐提醒
     "break_reminder_min": "60",
     "break_reminder_text": "站起来活动活动，记得多喝水 🚰",
@@ -233,7 +234,7 @@ class Store:
         return self.conn.execute(
             "SELECT COALESCE(NULLIF(category, ''), '未分类') AS cat, "
             "COALESCE(SUM(actual_min), 0) AS m FROM sessions "
-            "WHERE type='focus' AND status IN ('completed','abandoned') "
+            "WHERE type IN ('focus','stopwatch') AND status IN ('completed','abandoned') "
             "AND start_ts >= ? GROUP BY cat ORDER BY m DESC",
             (since,)).fetchall()
 
@@ -245,7 +246,7 @@ class Store:
             "AS INTEGER) + 6) % 7 AS wd, "
             "CAST(strftime('%H', start_ts, 'unixepoch', 'localtime') AS INTEGER) "
             "AS hr, SUM(actual_min) AS m FROM sessions "
-            "WHERE type='focus' AND status IN ('completed','abandoned') "
+            "WHERE type IN ('focus','stopwatch') AND status IN ('completed','abandoned') "
             "AND start_ts >= ? GROUP BY wd, hr", (since,)).fetchall()
         return [(r["wd"], r["hr"], r["m"]) for r in rows]
 
@@ -255,7 +256,7 @@ class Store:
         return self.conn.execute(
             "SELECT date(start_ts, 'unixepoch', 'localtime') AS d, "
             "SUM(actual_min) AS m FROM sessions "
-            "WHERE type='focus' AND status IN ('completed','abandoned') "
+            "WHERE type IN ('focus','stopwatch') AND status IN ('completed','abandoned') "
             "AND start_ts >= ? GROUP BY d ORDER BY m DESC LIMIT 1",
             (since,)).fetchone()
 
@@ -360,7 +361,7 @@ class Store:
         rows = self.conn.execute(
             "SELECT date(start_ts, 'unixepoch', 'localtime') AS d, "
             "COUNT(*) AS n FROM sessions "
-            "WHERE type='focus' AND status='completed' AND start_ts >= ? "
+            "WHERE type IN ('focus','stopwatch') AND status='completed' AND start_ts >= ? "
             "GROUP BY d", (since,)).fetchall()
         return {r["d"]: r["n"] for r in rows}
 
@@ -370,7 +371,7 @@ class Store:
         rows = self.conn.execute(
             "SELECT date(start_ts, 'unixepoch', 'localtime') AS d, "
             "COALESCE(SUM(actual_min), 0) AS m FROM sessions "
-            "WHERE type='focus' AND status IN ('completed','abandoned') "
+            "WHERE type IN ('focus','stopwatch') AND status IN ('completed','abandoned') "
             "AND start_ts >= ? GROUP BY d", (since,)).fetchall()
         return [(r["d"], r["m"]) for r in rows]
 
@@ -378,14 +379,14 @@ class Store:
         since = self._day_start(date.today())
         row = self.conn.execute(
             "SELECT COUNT(*) AS n FROM sessions "
-            "WHERE type='focus' AND status='completed' AND start_ts >= ?",
+            "WHERE type IN ('focus','stopwatch') AND status='completed' AND start_ts >= ?",
             (since,)).fetchone()
         return row["n"]
 
     def total_pomodoros(self) -> int:
         row = self.conn.execute(
             "SELECT COUNT(*) AS n FROM sessions "
-            "WHERE type='focus' AND status='completed'").fetchone()
+            "WHERE type IN ('focus','stopwatch') AND status='completed'").fetchone()
         return row["n"]
 
     def focus_summary(self) -> tuple[float, float, float]:
@@ -396,7 +397,7 @@ class Store:
             "AS today_m, COALESCE(SUM(actual_min),0) AS total_m, "
             "SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS c, "
             "SUM(CASE WHEN status='abandoned' THEN 1 ELSE 0 END) AS a "
-            "FROM sessions WHERE type='focus' "
+            "FROM sessions WHERE type IN ('focus','stopwatch') "
             "AND status IN ('completed','abandoned')",
             (today_since,)).fetchone()
         done, abandoned = row["c"] or 0, row["a"] or 0

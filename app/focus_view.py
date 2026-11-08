@@ -49,6 +49,8 @@ class FocusView(QWidget):
     task_selected = Signal(object)  # task_id 或 None
     category_selected = Signal(str)  # 计时归类
     duration_selected = Signal(int)  # 本次专注时长（分钟）
+    mode_selected = Signal(str)      # pomodoro / stopwatch
+    stop_requested = Signal()        # 顺计时：停止并记录
     noise_mixer_requested = Signal()
     mini_requested = Signal()
 
@@ -58,6 +60,8 @@ class FocusView(QWidget):
         self._updating_combo = False
         self._updating_category = False
         self._updating_duration = False
+        self._updating_mode = False
+        self.mode = "pomodoro"
 
         root = QHBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
@@ -70,6 +74,21 @@ class FocusView(QWidget):
         left_layout.setSpacing(12)
 
         phase_row = QHBoxLayout()
+        self.btn_mode_pomo = QPushButton("🍅 番茄")
+        self.btn_mode_pomo.setCheckable(True)
+        self.btn_mode_pomo.setFixedHeight(30)
+        self.btn_mode_pomo.setCursor(Qt.PointingHandCursor)
+        self.btn_mode_pomo.clicked.connect(
+            lambda: self.mode_selected.emit("pomodoro"))
+        self.btn_mode_stop = QPushButton("⏱ 顺计时")
+        self.btn_mode_stop.setCheckable(True)
+        self.btn_mode_stop.setFixedHeight(30)
+        self.btn_mode_stop.setCursor(Qt.PointingHandCursor)
+        self.btn_mode_stop.clicked.connect(
+            lambda: self.mode_selected.emit("stopwatch"))
+        phase_row.addWidget(self.btn_mode_pomo)
+        phase_row.addWidget(self.btn_mode_stop)
+        phase_row.addStretch(1)
         self.phase_label = QLabel("准备开始专注")
         self.phase_label.setAlignment(Qt.AlignCenter)
         self.phase_label.setObjectName("title")
@@ -89,7 +108,8 @@ class FocusView(QWidget):
 
         task_row = QHBoxLayout()
         task_row.addStretch(1)
-        task_row.addWidget(QLabel("本次专注"))
+        self.duration_label = QLabel("本次专注")
+        task_row.addWidget(self.duration_label)
         self.duration_combo = QComboBox()
         self.duration_combo.setEditable(True)
         self.duration_combo.setInsertPolicy(QComboBox.NoInsert)
@@ -100,7 +120,8 @@ class FocusView(QWidget):
         self.duration_combo.currentIndexChanged.connect(self._on_duration_changed)
         self.duration_combo.editTextChanged.connect(self._on_duration_text_changed)
         task_row.addWidget(self.duration_combo)
-        task_row.addWidget(QLabel("分钟"))
+        self.unit_label = QLabel("分钟")
+        task_row.addWidget(self.unit_label)
         task_row.addSpacing(14)
         task_row.addWidget(QLabel("分类"))
         self.category_combo = QComboBox()
@@ -133,8 +154,13 @@ class FocusView(QWidget):
         self.btn_skip = QPushButton("跳过休息")
         self.btn_skip.setFixedHeight(42)
         self.btn_skip.clicked.connect(self.skip_break_requested.emit)
+        self.btn_stop = QPushButton("停止并记录")
+        self.btn_stop.setObjectName("primary")
+        self.btn_stop.setFixedHeight(42)
+        self.btn_stop.clicked.connect(self.stop_requested.emit)
         btn_row.addWidget(self.btn_primary)
         btn_row.addWidget(self.btn_pause)
+        btn_row.addWidget(self.btn_stop)
         btn_row.addWidget(self.btn_skip)
         btn_row.addWidget(self.btn_abandon)
         btn_row.addStretch(1)
@@ -222,6 +248,60 @@ class FocusView(QWidget):
         if 1 <= int(minutes) <= 180:
             self.duration_selected.emit(int(minutes))
 
+    def set_mode(self, mode: str) -> None:
+        """切换 番茄/顺计时 模式（待机时才允许切换）。"""
+        self.mode = mode
+        self._updating_mode = True
+        self.btn_mode_pomo.setChecked(mode == "pomodoro")
+        self.btn_mode_stop.setChecked(mode == "stopwatch")
+        self._updating_mode = False
+        self.duration_label.setVisible(mode == "pomodoro")
+        self.duration_combo.setVisible(mode == "pomodoro")
+        self.unit_label.setVisible(mode == "pomodoro")
+        if mode == "stopwatch":
+            self.phase_label.setText("准备开始顺计时")
+            self.btn_primary.setText("开始顺计时")
+            self.btn_primary.setVisible(True)
+            self.btn_pause.setVisible(False)
+            self.btn_stop.setVisible(False)
+            self.btn_skip.setVisible(False)
+            self.btn_abandon.setVisible(False)
+            self.ring.set_display("00:00", 0.0, "stopwatch")
+
+    def set_stopwatch(self, elapsed: float, running: bool, paused: bool) -> None:
+        total = max(1, elapsed)
+        text = self._fmt_elapsed(elapsed)
+        progress = min(1.0, elapsed / (45 * 60))
+        self.ring.set_display(text, progress, "stopwatch")
+        if running:
+            self.phase_label.setText("⏱ 顺计时中")
+            self.btn_primary.setVisible(False)
+            self.btn_stop.setVisible(True)
+            self.btn_pause.setText("暂停")
+            self.btn_pause.setVisible(True)
+            self.btn_abandon.setVisible(True)
+        elif paused:
+            self.phase_label.setText("⏱ 已暂停")
+            self.btn_primary.setText("继续")
+            self.btn_primary.setVisible(True)
+            self.btn_stop.setVisible(False)
+            self.btn_pause.setVisible(False)
+            self.btn_abandon.setVisible(True)
+        else:
+            self.phase_label.setText("准备开始顺计时")
+            self.btn_primary.setText("开始顺计时")
+            self.btn_primary.setVisible(True)
+            self.btn_stop.setVisible(False)
+            self.btn_pause.setVisible(False)
+            self.btn_abandon.setVisible(False)
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        s = int(seconds)
+        if s >= 3600:
+            return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+        return f"{s // 60:02d}:{s % 60:02d}"
+
     def set_duration(self, minutes: int) -> None:
         """外部（设置/初始化）同步显示，不触发信号。"""
         self._updating_duration = True
@@ -231,6 +311,8 @@ class FocusView(QWidget):
         else:
             self.duration_combo.setEditText(str(minutes))
         self._updating_duration = False
+        self._updating_mode = False
+        self.mode = "pomodoro"
 
     def _on_primary(self) -> None:
         {"start_focus": self.start_requested,
