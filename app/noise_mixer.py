@@ -2,9 +2,10 @@
 """白噪音混音器：＋添加需要的音源，逐个调音量，实时生效并持久化。"""
 import json
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel,
-                               QPushButton, QScrollArea, QSlider,
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QHBoxLayout,
+                               QLabel, QPushButton, QScrollArea, QSlider,
                                QVBoxLayout, QWidget)
 
 from core.sound import DEFAULT_VOLUME, NOISES
@@ -20,6 +21,31 @@ NOISE_LABELS = {
     "waves": "🌊 海浪", "fire": "🔥 篝火", "wind": "🍃 风声",
     "birds": "🐦 鸟鸣", "cafe": "☕ 咖啡馆", "brown": "🟤 棕噪音",
 }
+
+
+class _ListWheelScroller(QObject):
+    """把音源列表里标签/按钮上的滚轮原样转交给 QScrollArea。
+
+    QScrollArea 的滚轮落在 QLabel / QPushButton 上时容易被吞掉，
+    列表看上去「滚不动」。转交给 viewport 后按 Qt 原生步长滚动。
+    音量 QSlider 不挂此过滤器，保留它「滚轮微调音量」的行为。
+    """
+
+    def __init__(self, scroll: QScrollArea, parent=None):
+        super().__init__(parent)
+        self._scroll = scroll
+
+    def eventFilter(self, obj, event) -> bool:
+        if (event.type() != QEvent.Wheel
+                or self._scroll.verticalScrollBar().maximum() <= 0):
+            return False
+        forwarded = QWheelEvent(
+            event.position(), event.globalPosition(),
+            event.pixelDelta(), event.angleDelta(),
+            event.buttons(), event.modifiers(), event.phase(),
+            event.inverted())
+        QApplication.sendEvent(self._scroll.viewport(), forwarded)
+        return True
 
 
 class NoiseMixerDialog(QDialog):
@@ -48,6 +74,7 @@ class NoiseMixerDialog(QDialog):
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
         self._rows_layout.setSpacing(8)
         scroll.setWidget(self._list_body)
+        self._list_scroller = _ListWheelScroller(scroll)
         outer.addWidget(scroll, stretch=1)
 
         empty = QLabel("还没有添加音源——从下面选一个开始 🎧")
@@ -59,6 +86,9 @@ class NoiseMixerDialog(QDialog):
         # 添加区：下拉框 + ＋按钮
         add_row = QHBoxLayout()
         self.available_combo = QComboBox()
+        # 十几个音色用滚轮浏览更顺手：显式豁免全局「下拉框禁滚轮」守卫，
+        # 其余页面的下拉框防误触规则保持不变。
+        self.available_combo.setProperty("wheelGuardExempt", True)
         add_row.addWidget(self.available_combo, stretch=1)
         self._add_btn = QPushButton("＋ 添加音源")
         self._add_btn.setObjectName("primary")
@@ -141,6 +171,9 @@ class NoiseMixerDialog(QDialog):
         row.addWidget(slider, stretch=1)
         row.addWidget(value_label)
         row.addWidget(remove_btn)
+        # 非滑块区域统一交给列表滚动；滑块自身保留滚轮微调音量
+        for widget in (label, value_label, remove_btn):
+            widget.installEventFilter(self._list_scroller)
         self._rows[name] = {"slider": slider, "label": value_label}
         return row
 

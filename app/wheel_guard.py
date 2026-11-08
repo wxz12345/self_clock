@@ -6,6 +6,8 @@
 - QSpinBox / QDateTimeEdit：**只有点击过该控件**之后，滚轮才调整数值
   （仅"有焦点"不够——切页时 Qt 会自动把焦点给第一个控件）
 - QSlider 等其它控件不受影响（音量滑块本就该用滚轮）
+- 例外：控件声明 `wheelGuardExempt` 动态属性后跳过守卫（目前只有白噪音
+  混音器的音色下拉框使用，选项多，滚轮浏览更顺手）
 
 注意：QSpinBox 内部有 QLineEdit 子控件，点击事件常由子控件接收，
 因此判断时沿父链向上找真正的 SpinBox/ComboBox。
@@ -27,6 +29,21 @@ def _find_ancestor(obj, types):
     return None
 
 
+def _is_exempt(obj) -> bool:
+    """控件（或其祖先）声明 wheelGuardExempt 时，跳过守卫拦截。
+
+    用于个别确实需要滚轮的下拉框，例如白噪音混音器的音色选择器：
+    它有十几个选项，滚轮浏览比逐个点开更顺手。全局规则不变，
+    只有显式声明的控件才豁免。
+    """
+    w = obj
+    while w is not None:
+        if w.property("wheelGuardExempt"):
+            return True
+        w = w.parent()
+    return False
+
+
 class WheelGuard(QObject):
     """装在 QApplication 上，拦截所有滚轮事件。"""
 
@@ -43,6 +60,10 @@ class WheelGuard(QObject):
             return False
 
         if etype != QEvent.Wheel:
+            return False
+
+        # 显式豁免的控件优先放行（如混音器的音色下拉框）
+        if _is_exempt(obj):
             return False
 
         # 下拉框：滚轮一律不改变选中项
