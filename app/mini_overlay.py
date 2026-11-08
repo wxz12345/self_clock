@@ -10,8 +10,8 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from . import theme
 
-SIZE_W = 190
-SIZE_H = 216
+SIZE_W = 230
+SIZE_H = 232
 
 
 class MiniOverlay(QWidget):
@@ -34,9 +34,11 @@ class MiniOverlay(QWidget):
         self._drag_offset: QPoint | None = None
 
         # ----- 控制按钮 -----
+        self.setStyleSheet("QPushButton { padding: 3px 8px; font-size: 12px; }")
         self.btn_primary = QPushButton("开始专注")
         self.btn_primary.setObjectName("primary")
         self.btn_primary.setFixedHeight(30)
+        self.btn_primary.setMinimumWidth(88)
         self.btn_primary.clicked.connect(self.primary_requested.emit)
         self.btn_abandon = QPushButton("放弃")
         self.btn_abandon.setObjectName("danger")
@@ -48,7 +50,7 @@ class MiniOverlay(QWidget):
         self.btn_expand = QPushButton("返回")
         self.btn_expand.setToolTip("返回主窗口（也可以双击迷你窗背景）")
         self.btn_expand.setFixedHeight(30)
-        self.btn_expand.setFixedWidth(56)
+        self.btn_expand.setFixedWidth(52)
         self.btn_expand.clicked.connect(self.expand_requested.emit)
 
         row = QHBoxLayout()
@@ -107,7 +109,8 @@ class MiniOverlay(QWidget):
         p.setBrush(QColor(*theme.OVERLAY))
         p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, SIZE_H - 8), 18, 18)
 
-        ring_rect = QRectF(28, 16, SIZE_W - 56, SIZE_W - 56)
+        ring_d = SIZE_W - 92
+        ring_rect = QRectF((SIZE_W - ring_d) / 2, 14, ring_d, ring_d)
         track = QPen(QColor(theme.CARD_2), 6)
         track.setCapStyle(Qt.RoundCap)
         p.setPen(track)
