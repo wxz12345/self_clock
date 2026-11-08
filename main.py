@@ -74,6 +74,10 @@ def _another_instance_running() -> bool:
         socket.write(b"show\n")
         socket.flush()
         socket.waitForBytesWritten(300)
+        # 握手：真正存活的实例会回复 "ok"。连得上却没回复，说明是残留的
+        # 僵死进程占着管道（异常退出后可能出现），按"无实例"处理，避免永远启动不了。
+        running = bool(socket.waitForReadyRead(800)
+                       and b"ok" in bytes(socket.readAll()))
     socket.disconnectFromServer()
     return running
 
@@ -128,7 +132,10 @@ def main() -> int:
         def _on_new_connection() -> None:
             socket = server.nextPendingConnection()
             if socket and socket.waitForReadyRead(300):
-                if b"show" in socket.readAll():
+                # 注意：PySide6 下 `b"x" in QByteArray` 恒为 False，必须先转 bytes
+                if b"show" in bytes(socket.readAll()):
+                    socket.write(b"ok\n")
+                    socket.flush()
                     window.showNormal()
                     window.raise_()
                     window.activateWindow()
