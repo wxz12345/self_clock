@@ -383,6 +383,19 @@ class MainWindow(QMainWindow):
         self._update_tray()
         self._refresh_overlay()
 
+    def showEvent(self, event) -> None:
+        """主窗口显示时自动收起迷你窗，避免两者重叠（文字透出）。"""
+        super().showEvent(event)
+        if (self.overlay is not None and self.overlay.isVisible()
+                and not getattr(self, "_expanding_mini", False)):
+            self._save_mini_pos()
+            self.overlay.hide()
+            if self.mini_grip is not None:
+                self.mini_grip.hide()
+            if self.mini_controls is not None:
+                self.mini_controls.hide()
+            self.tray.act_mini.setText("显示迷你窗")
+
     # ================= 迷你窗 =================
     def _toggle_mini(self) -> None:
         if self.overlay is None:

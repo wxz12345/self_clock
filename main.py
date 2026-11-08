@@ -70,10 +70,12 @@ def main() -> int:
 
     from app import icons  # noqa: E402
     from app.main_window import MainWindow  # noqa: E402
+    from app.wheel_guard import install_wheel_guard  # noqa: E402
     from core.backup import auto_backup  # noqa: E402
     from core.sound import SoundPlayer  # noqa: E402
 
     app.setWindowIcon(icons.load_app_icon())
+    install_wheel_guard(app)   # 下拉框禁滚轮；数值框需先点选
     font = QFont("Microsoft YaHei UI", 10)
     app.setFont(font)
 

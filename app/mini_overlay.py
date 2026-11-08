@@ -227,8 +227,8 @@ class MiniControls(QWidget):
         self.btn_skip.setVisible(show_skip)
 
     def set_state_label(self, label: str) -> None:
+        """保留接口（状态已由圆环颜色表达，按钮行不再绘制文字）。"""
         self._label = label
-        self.update()
 
     def set_opacity(self, percent: int) -> None:
         self._opacity = max(0.15, min(1.0, percent / 100.0))
@@ -243,11 +243,4 @@ class MiniControls(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(card)
         p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, CONTROLS_H - 8), 14, 14)
-
-        p.setPen(QColor(theme.TEXT_DIM))
-        small = QFont()
-        small.setPixelSize(12)
-        p.setFont(small)
-        p.drawText(QRectF(0, 4, SIZE_W, CONTROLS_H - 8),
-                   Qt.AlignHCenter | Qt.AlignVCenter, self._label)
         p.end()
