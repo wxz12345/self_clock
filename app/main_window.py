@@ -27,7 +27,7 @@ from . import icons, theme
 from .close_dialog import CloseDialog
 from .distraction_dialog import DistractionDialog
 from .focus_view import FocusView
-from .mini_overlay import (CONTROLS_H, MiniControls, MiniOverlay,
+from .mini_overlay import (CONTROLS_H, MiniControls, MiniGrip, MiniOverlay,
                            VISUAL_H)
 from .noise_mixer import NoiseMixerDialog
 from .reminder_popup import ReminderPopup
@@ -387,9 +387,11 @@ class MainWindow(QMainWindow):
     def _toggle_mini(self) -> None:
         if self.overlay is None:
             self.overlay = MiniOverlay()
+            self.mini_grip = MiniGrip()
             self.mini_controls = MiniControls()
-            self.overlay.grip_drag_moved.connect(self._on_mini_drag_moved)
-            self.overlay.grip_drag_finished.connect(self._save_mini_pos)
+            self.overlay.moved.connect(self._on_mini_moved)
+            self.mini_grip.drag_moved.connect(self._on_grip_dragged)
+            self.mini_grip.drag_finished.connect(self._save_mini_pos)
             self.mini_controls.primary_requested.connect(self._tray_toggle)
             self.mini_controls.abandon_requested.connect(self._on_abandon_requested)
             self.mini_controls.skip_requested.connect(self._on_skip_break)
@@ -397,12 +399,13 @@ class MainWindow(QMainWindow):
             self.mini_controls.opacity_selected.connect(self._on_mini_opacity)
             last_op = self.store.get_int("mini_opacity", 100)
             self.overlay.set_opacity(last_op)
+            self.mini_grip.set_opacity(last_op)
             self.mini_controls.set_opacity(last_op)
         if self.overlay.isVisible():
             self._save_mini_pos()
             self.overlay.hide()
-            if self.mini_controls is not None:
-                self.mini_controls.hide()
+            self.mini_grip.hide()
+            self.mini_controls.hide()
             self.tray.act_mini.setText("显示迷你窗")
         else:
             pos = self._load_mini_pos()
@@ -414,22 +417,38 @@ class MainWindow(QMainWindow):
                 self.overlay.move(
                     screen.left() + (screen.width() - self.overlay.width()) // 2,
                     screen.top() + (screen.height() - self.overlay.height()) // 2)
-            self.mini_controls.move(self.overlay.x(),
-                                    self.overlay.y() + VISUAL_H)
+            self._sync_mini_windows()
             self._refresh_overlay()
             self.overlay.show()
+            self.mini_grip.show()
             self.mini_controls.show()
             # 迷你模式接管：主窗口隐藏，控制全部在迷你窗上进行
             self.hide()
             self.tray.act_mini.setText("隐藏迷你窗")
+
+    def _sync_mini_windows(self) -> None:
+        """把把手和按钮行贴到视觉窗上（视觉窗坐标为准）。"""
+        if self.overlay is None:
+            return
+        x, y = self.overlay.x(), self.overlay.y()
+        self.mini_grip.move(x + 2, y + 2)
+        self.mini_controls.move(x, y + VISUAL_H)
+
+    def _on_mini_moved(self, pos) -> None:
+        """视觉窗被移动（含系统贴边/分屏）→ 把手与按钮行跟随。"""
+        self._sync_mini_windows()
+
+    def _on_grip_dragged(self, grip_pos) -> None:
+        """拖动把手 → 移动视觉窗（它的 moveEvent 会带动其余窗口）。"""
+        self.overlay.move(grip_pos.x() - 2, grip_pos.y() - 2)
 
     def _expand_mini(self) -> None:
         """从迷你模式返回主窗口。"""
         if self.overlay is not None:
             self._save_mini_pos()
             self.overlay.hide()
-            if self.mini_controls is not None:
-                self.mini_controls.hide()
+            self.mini_grip.hide()
+            self.mini_controls.hide()
             self.tray.act_mini.setText("显示迷你窗")
         self.showNormal()
 
@@ -587,6 +606,10 @@ class MainWindow(QMainWindow):
 
     def _on_mini_opacity(self, percent: int) -> None:
         self.store.set_setting("mini_opacity", percent)
+        if self.mini_grip is not None:
+            self.mini_grip.set_opacity(percent)
+        if self.overlay is not None:
+            self.overlay.set_opacity(percent)
 
     def _on_duration_selected(self, minutes: int) -> None:
         """专注页手动设置"本次专注"时长：立即反映到倒计时
@@ -635,7 +658,7 @@ class MainWindow(QMainWindow):
                                        min(1.0, elapsed / (45 * 60)), True)
         if self.overlay is not None and self.overlay.isVisible():
             self.overlay.set_display(text, min(1.0, elapsed / (45 * 60)),
-                                     "stopwatch", True, "⏱ 顺计时中")
+                                     "stopwatch")
         self._update_tray(f"⏱ {int(elapsed // 60):02d}:{int(elapsed) % 60:02d}")
 
     def _on_stopwatch_state(self) -> None:
