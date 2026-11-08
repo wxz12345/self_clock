@@ -20,3 +20,6 @@ preview/
 .zcode/
 *.log
 assets/noise/pure_thunder.mp3
+
+# WorkBuddy 本地工作数据（含本机路径的笔记，绝不入库）
+.workbuddy/
