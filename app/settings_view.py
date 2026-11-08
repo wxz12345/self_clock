@@ -230,6 +230,10 @@ class SettingsView(QWidget):
         save_row.addWidget(data_btn)
         save_row.addStretch(1)
         root.addLayout(save_row)
+        from core.version import __version__
+        version_label = QLabel(f"自律番茄钟 v{__version__}")
+        version_label.setObjectName("muted")
+        root.addWidget(version_label)
         root.addStretch(1)
 
         self.load_settings()

@@ -90,6 +90,16 @@ CREATE TABLE IF NOT EXISTS app_usage (
     process TEXT NOT NULL,
     seconds REAL NOT NULL
 );
+-- 今天之前的 app_usage 明细按"天+进程"汇总后存这里（见 compact_app_usage）
+CREATE TABLE IF NOT EXISTS app_usage_daily (
+    day TEXT NOT NULL,              -- 本地日期 YYYY-MM-DD
+    process TEXT NOT NULL,
+    seconds REAL NOT NULL,
+    PRIMARY KEY (day, process)
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(start_ts);
+CREATE INDEX IF NOT EXISTS idx_distractions_ts ON distractions(ts);
+CREATE INDEX IF NOT EXISTS idx_app_usage_ts ON app_usage(ts);
 """
 
 
@@ -99,6 +109,7 @@ class Store:
         self.db_path = os.path.join(data_dir, "selfclock.db")
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         # 旧库迁移：sessions 可能没有 category 列
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(sessions)")}
@@ -205,10 +216,23 @@ class Store:
             (session_id, time.time(), reason, note, source))
         self.conn.commit()
 
-    def distraction_reason_counts(self, days: int | None = 30):
+    @staticmethod
+    def _day_range(day: str) -> tuple[float, float]:
+        """本地日期 YYYY-MM-DD -> [当天 0 点, 次日 0 点) 的时间戳区间。"""
+        d = date.fromisoformat(day)
+        return (time.mktime(d.timetuple()),
+                time.mktime((d + timedelta(days=1)).timetuple()))
+
+    def distraction_reason_counts(self, days: int | None = 30,
+                                  day: str | None = None):
+        """分心原因计数；传 day（YYYY-MM-DD）只统计当天，否则近 N 天。"""
         sql = ("SELECT reason, COUNT(*) AS n FROM distractions")
         args: list = []
-        if days is not None:
+        if day is not None:
+            lo, hi = self._day_range(day)
+            sql += " WHERE ts >= ? AND ts < ?"
+            args += [lo, hi]
+        elif days is not None:
             sql += " WHERE ts >= ?"
             args.append(time.time() - days * 86400)
         sql += " GROUP BY reason ORDER BY n DESC"
@@ -222,22 +246,59 @@ class Store:
             (session_id, time.time(), process, round(seconds, 1)))
         self.conn.commit()
 
-    def top_app_usage(self, days: int = 30, limit: int = 8):
-        since = time.time() - days * 86400
-        return self.conn.execute(
-            "SELECT process, SUM(seconds) AS s FROM app_usage WHERE ts >= ? "
-            "GROUP BY process ORDER BY s DESC LIMIT ?",
-            (since, limit)).fetchall()
+    def compact_app_usage(self) -> int:
+        """把今天之前的 app_usage 明细按"本地日期+进程"汇总进 app_usage_daily，
+        并删除已汇总的明细。幂等，可重复调用；返回被汇总的明细行数。"""
+        today_start = self._day_start(date.today())
+        rows = self.conn.execute(
+            "SELECT date(ts, 'unixepoch', 'localtime') AS d, process, "
+            "SUM(seconds) AS s, COUNT(*) AS n FROM app_usage "
+            "WHERE ts < ? GROUP BY d, process", (today_start,)).fetchall()
+        if not rows:
+            return 0
+        for r in rows:
+            self.conn.execute(
+                "INSERT INTO app_usage_daily(day, process, seconds) "
+                "VALUES(?,?,?) ON CONFLICT(day, process) DO UPDATE SET "
+                "seconds = seconds + excluded.seconds",
+                (r["d"], r["process"], r["s"]))
+        self.conn.execute("DELETE FROM app_usage WHERE ts < ?", (today_start,))
+        self.conn.commit()
+        return sum(r["n"] for r in rows)
 
-    def category_minutes(self, days: int = 30):
-        """近 N 天 focus 会话按归类的专注分钟。"""
-        since = time.time() - days * 86400
+    def top_app_usage(self, days: int = 30, limit: int = 8,
+                      day: str | None = None):
+        """应用使用 Top N（秒）：同时读今日明细与历史按天汇总。
+        传 day 只统计当天，否则近 N 天（含今天）。"""
+        if day is not None:
+            lo, hi = self._day_range(day)
+            first = last = day
+        else:
+            lo, hi = time.time() - days * 86400, float("inf")
+            first = date.fromtimestamp(lo).isoformat()
+            last = date.today().isoformat()
+        return self.conn.execute(
+            "SELECT process, SUM(s) AS s FROM ("
+            " SELECT process, seconds AS s FROM app_usage"
+            "  WHERE ts >= ? AND ts < ?"
+            " UNION ALL"
+            " SELECT process, seconds AS s FROM app_usage_daily"
+            "  WHERE day >= ? AND day <= ?"
+            ") GROUP BY process ORDER BY s DESC LIMIT ?",
+            (lo, hi, first, last, limit)).fetchall()
+
+    def category_minutes(self, days: int = 30, day: str | None = None):
+        """focus 会话按归类的专注分钟；传 day 只统计当天，否则近 N 天。"""
+        if day is not None:
+            lo, hi = self._day_range(day)
+        else:
+            lo, hi = time.time() - days * 86400, float("inf")
         return self.conn.execute(
             "SELECT COALESCE(NULLIF(category, ''), '未分类') AS cat, "
             "COALESCE(SUM(actual_min), 0) AS m FROM sessions "
             "WHERE type IN ('focus','stopwatch') AND status IN ('completed','abandoned') "
-            "AND start_ts >= ? GROUP BY cat ORDER BY m DESC",
-            (since,)).fetchall()
+            "AND start_ts >= ? AND start_ts < ? GROUP BY cat ORDER BY m DESC",
+            (lo, hi)).fetchall()
 
     def weekday_hour_minutes(self, days: int = 90):
         """热力图数据：[(星期 0=周一…6=周日, 小时, 分钟)]。"""
@@ -269,6 +330,7 @@ class Store:
             self.conn.execute("DELETE FROM distractions")
         if usage:
             self.conn.execute("DELETE FROM app_usage")
+            self.conn.execute("DELETE FROM app_usage_daily")
         if coins:
             self.conn.execute("DELETE FROM coins_log")
             self.set_setting("coins", 0)
@@ -332,13 +394,23 @@ class Store:
     # ---------- 备份 / 导出 ----------
     def backup_to(self, path: str) -> None:
         self.conn.commit()
-        shutil.copy2(self.db_path, path)
+        # WAL 模式下直接复制主文件会漏掉 -wal 里的新数据，改用 SQLite 备份 API
+        dest = sqlite3.connect(path)
+        try:
+            self.conn.backup(dest)
+        finally:
+            dest.close()
 
     def restore_from(self, path: str) -> None:
         """用备份覆盖当前数据库。调用方负责之后重启应用。"""
         self.conn.commit()
         self.conn.close()
         shutil.copy2(path, self.db_path)
+        for suffix in ("-wal", "-shm"):   # 清掉旧库遗留的日志，避免与新库错配
+            try:
+                os.remove(self.db_path + suffix)
+            except OSError:
+                pass
 
     def merge_from(self, path: str) -> dict:
         """把备份数据合并进当前库：id 全部重映射，按业务键去重，
@@ -409,6 +481,21 @@ class Store:
                 " VALUES(?,?,?,?)",
                 (sess_map.get(r["session_id"]), r["ts"], r["process"],
                  r["seconds"]))
+            stats["app_usage"] += 1
+
+        # ---- 应用使用按天汇总（去重键：day + process；旧备份可能没有此表）----
+        try:
+            daily_rows = b.execute("SELECT * FROM app_usage_daily").fetchall()
+        except sqlite3.OperationalError:
+            daily_rows = []
+        for r in daily_rows:
+            if self.conn.execute(
+                    "SELECT 1 FROM app_usage_daily WHERE day=? AND process=?",
+                    (r["day"], r["process"])).fetchone():
+                continue
+            self.conn.execute(
+                "INSERT INTO app_usage_daily(day, process, seconds)"
+                " VALUES(?,?,?)", (r["day"], r["process"], r["seconds"]))
             stats["app_usage"] += 1
 
         # ---- 提醒（去重键：title + remind_ts）----

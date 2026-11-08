@@ -10,6 +10,7 @@
   墙钟时间累计应用使用时长——主线程被弹窗阻塞、信号排队时也不会算错。
 """
 import ctypes
+import logging
 import time
 from ctypes import wintypes
 
@@ -45,7 +46,11 @@ def get_foreground_process_name() -> str | None:
         if not pid.value:
             return None
         return psutil.Process(pid.value).name()
+    except (psutil.Error, OSError, ValueError):
+        # 进程已退出 / 无权限（如提权窗口）属正常情况，静默跳过
+        return None
     except Exception:
+        logging.getLogger(__name__).exception("读取前台进程失败")
         return None
 
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """自动备份：每日首次启动时把数据库复制到 backups/，保留最近 N 份。"""
 import os
-import shutil
+import sqlite3
 import time
 from datetime import date
 
@@ -15,7 +15,14 @@ def auto_backup(db_path: str, backups_dir: str, keep: int = 14) -> str | None:
             return None
     dest = os.path.join(backups_dir,
                         f"selfclock_{today_tag}_{time.strftime('%H%M%S')}.db")
-    shutil.copy2(db_path, dest)
+    # WAL 模式下直接复制主文件会漏数据，用 SQLite 备份 API（可与运行中的连接并存）
+    src = sqlite3.connect(db_path)
+    out = sqlite3.connect(dest)
+    try:
+        src.backup(out)
+    finally:
+        out.close()
+        src.close()
     _prune(backups_dir, keep)
     return dest
 

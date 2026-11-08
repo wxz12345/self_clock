@@ -1025,7 +1025,10 @@ class MainWindow(QMainWindow):
 
     # ================= 备份 / 恢复 / 导出 =================
     def _main_py_path(self) -> str:
-        return os.path.join(os.path.dirname(self.data_dir), "main.py")
+        # 不依赖 data_dir 位置（数据目录可能回退到 %APPDATA%）
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "main.py")
 
     def _on_backup(self) -> None:
         from datetime import datetime
@@ -1055,7 +1058,10 @@ class MainWindow(QMainWindow):
         self.monitor.stop()
         self.store.restore_from(path)
         from PySide6.QtCore import QProcess
-        QProcess.startDetached(sys.executable, [self._main_py_path()])
+        if getattr(sys, "frozen", False):   # 打包版：exe 本身即入口，不能再传 main.py
+            QProcess.startDetached(sys.executable, [])
+        else:
+            QProcess.startDetached(sys.executable, [self._main_py_path()])
         self._really_quit = True
         QApplication.quit()
 

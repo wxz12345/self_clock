@@ -64,9 +64,9 @@ class PomodoroTimer(QObject):
         return self._round
 
     def remaining_seconds(self) -> float:
-        if self._running:
+        if self._running and not self._paused:
             return max(0.0, self._end_ts - time.time())
-        return self._remaining
+        return self._remaining   # 暂停/待机：冻结值
 
     def configure(self, work_min: float, short_min: float, long_min: float,
                   rounds: int, auto_start_breaks: bool) -> None:

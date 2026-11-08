@@ -110,9 +110,7 @@ def main():
     write_wav("chime.wav", chime())
     write_wav("coin.wav", coin())
     write_wav("reminder.wav", reminder())
-    # 白噪音中的"棕噪音"保留合成版（纯数学噪音不存在压缩音质损失），
-    # 雨声/海浪/篝火/风声改用 assets/noise/ 下的真实录音 mp3（见 CREDITS.md）
-    write_wav(os.path.join("noise", "brown.wav"), brown_noise(), rate=RATE2)
+    # 白噪音统一使用 assets/noise/ 下的 mp3 录音（见 CREDITS.md），不再合成
 
 
 # ==================== 白噪音（22050Hz 无缝循环） ====================

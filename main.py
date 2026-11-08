@@ -25,11 +25,38 @@ sys.path.insert(0, BASE_DIR)
 SINGLE_INSTANCE_KEY = "self_clock_single_instance"
 
 
+def _resolve_data_dir() -> str:
+    """数据目录：优先程序旁的 data/；该位置不可写（如装在 Program Files）
+    时回退到 %APPDATA%/SelfClock。"""
+    primary = os.path.join(BASE_DIR, "data")
+    try:
+        os.makedirs(primary, exist_ok=True)
+        probe = os.path.join(primary, ".write_test")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        return primary
+    except OSError:
+        fallback = os.path.join(
+            os.environ.get("APPDATA", os.path.expanduser("~")), "SelfClock")
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
+
+
+DATA_DIR = _resolve_data_dir()
+CRASH_LOG_MAX_BYTES = 1_000_000
+
+
 def _install_crash_logger() -> None:
     """pythonw / 打包无控制台，崩溃信息落到 data/crash.log 便于排查。"""
     def hook(exc_type, exc_value, exc_tb):
-        path = os.path.join(BASE_DIR, "data", "crash.log")
+        path = os.path.join(DATA_DIR, "crash.log")
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:   # 超过 1MB 轮转为 crash.log.1，避免无限增长
+            if os.path.getsize(path) > CRASH_LOG_MAX_BYTES:
+                os.replace(path, path + ".1")
+        except OSError:
+            pass
         with open(path, "a", encoding="utf-8") as f:
             f.write("".join(traceback.format_exception(
                 exc_type, exc_value, exc_tb)) + "\n" + "-" * 60 + "\n")
@@ -63,7 +90,8 @@ def main() -> int:
     from core.store import Store  # noqa: E402
     from app import theme  # noqa: E402
 
-    store = Store(os.path.join(BASE_DIR, "data"))
+    store = Store(DATA_DIR)
+    store.compact_app_usage()   # 今天之前的应用使用明细 -> 按天汇总
     theme.set_theme(store.get_setting("theme", "dark"))
     app.setPalette(theme.build_palette())
     app.setStyleSheet(theme.build_qss())
@@ -79,7 +107,7 @@ def main() -> int:
     font = QFont("Microsoft YaHei UI", 10)
     app.setFont(font)
 
-    data_dir = os.path.join(BASE_DIR, "data")
+    data_dir = DATA_DIR
     window = MainWindow(store, SoundPlayer(ASSET_DIR), data_dir, ASSET_DIR)
     window.show()
     window.raise_()
@@ -107,7 +135,11 @@ def main() -> int:
         server.newConnection.connect(_on_new_connection)
 
     code = app.exec()
-    # 音频/监控线程偶发阻塞进程退出：数据均已同步落库，直接结束进程
+    # 先正常关库（合并 WAL），再兜底强退：音频线程偶发阻塞进程退出
+    try:
+        store.close()
+    except Exception:
+        pass
     os._exit(code)
     return code
 

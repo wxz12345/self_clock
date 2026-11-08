@@ -3,10 +3,10 @@
 import math
 from datetime import date, timedelta
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QScrollArea, QTabWidget, QToolTip,
+                               QPushButton, QScrollArea, QTabWidget, QToolTip,
                                QVBoxLayout, QWidget)
 
 from core import gamify
@@ -52,10 +52,13 @@ class _StatCard(QFrame):
 class BarChart(QWidget):
     """柱状图：Y 轴刻度 + 悬浮提示，可由日数据（近 N 天）或现成序列驱动。"""
 
+    bar_clicked = Signal(str)   # 点击某根柱子（该列任意高度）时发出其 key
+
     def __init__(self, tooltip_fmt=None):
         super().__init__()
         self._series: list[tuple[str, float, str]] = []  # (label, value, key)
         self._highlight_key: str | None = None
+        self._selected_key: str | None = None   # 被点选的柱子，优先于默认高亮
         self._tooltip_fmt = tooltip_fmt or (lambda v: f"{v:.0f} 分钟")
         self._hover_idx = -1
         self.setMinimumHeight(180)
@@ -74,6 +77,10 @@ class BarChart(QWidget):
                    highlight_key: str | None = None) -> None:
         self._series = series
         self._highlight_key = highlight_key
+        self.update()
+
+    def set_selected(self, key: str | None) -> None:
+        self._selected_key = key
         self.update()
 
     # ---------- 几何（绘制与命中检测共用） ----------
@@ -132,8 +139,8 @@ class BarChart(QWidget):
         p.setPen(Qt.NoPen)
         for i, (label, value, key) in enumerate(self._series):
             rect = self._bar_rect(i, n, plot_w, plot_h, left, h, bottom)
-            highlighted = (self._highlight_key is not None
-                           and key == self._highlight_key)
+            active_key = self._selected_key or self._highlight_key
+            highlighted = active_key is not None and key == active_key
             hovered = i == self._hover_idx
             color = QColor(theme.ACCENT if highlighted else theme.BAR)
             if hovered and not highlighted:
@@ -175,6 +182,20 @@ class BarChart(QWidget):
     def leaveEvent(self, event) -> None:
         self._hover_idx = -1
         self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton or not self._series:
+            return
+        # 点击按整列判定（含 0 分钟的空柱），比悬浮的"仅柱体"命中更宽松
+        w, h, left, right, top, bottom = self._plot_geometry()
+        n = len(self._series)
+        plot_w = w - left - right
+        x = event.position().x()
+        for i in range(n):
+            rect = self._bar_rect(i, n, plot_w, h - top - bottom, left, h, bottom)
+            if rect.x() - 3 <= x <= rect.right() + 3 and top <= event.position().y() <= h - bottom:
+                self.bar_clicked.emit(self._series[i][2])
+                return
 
     def _hit_bar(self, pos) -> int:
         if not self._series:
@@ -351,6 +372,7 @@ class StatsView(QWidget):
     def __init__(self, store, parent=None):
         super().__init__(parent)
         self._store = store
+        self._selected_day: str | None = None   # None = 近 30 天汇总
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(16)
@@ -401,10 +423,19 @@ class StatsView(QWidget):
         chart_card = self._card()
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(16, 12, 16, 10)
-        chart_title = QLabel("近 30 天专注分钟")
+        chart_head = QHBoxLayout()
+        chart_title = QLabel("近 30 天专注分钟（点击某一天的柱子查看当天详情）")
         chart_title.setObjectName("muted")
-        chart_layout.addWidget(chart_title)
+        chart_head.addWidget(chart_title)
+        chart_head.addStretch(1)
+        self.btn_all30 = QPushButton("✓ 近 30 天")
+        self.btn_all30.setCursor(Qt.PointingHandCursor)
+        self.btn_all30.setToolTip("回到近 30 天汇总")
+        self.btn_all30.clicked.connect(lambda: self._select_day(None))
+        chart_head.addWidget(self.btn_all30)
+        chart_layout.addLayout(chart_head)
         self.bar_chart = BarChart()
+        self.bar_chart.bar_clicked.connect(self._select_day)
         chart_layout.addWidget(self.bar_chart, stretch=1)
         layout.addWidget(chart_card, stretch=1)
 
@@ -414,6 +445,7 @@ class StatsView(QWidget):
         reason_title = QLabel("分心原因排行（近 30 天）")
         reason_title.setObjectName("muted")
         reason_layout.addWidget(reason_title)
+        self.reason_title = reason_title
         self.reason_bars = ReasonBars()
         reason_layout.addWidget(self.reason_bars, stretch=1)
         layout.addWidget(reason_card, stretch=1)
@@ -424,6 +456,7 @@ class StatsView(QWidget):
         app_title = QLabel("专注期间应用使用 Top 8（近 30 天，按前台窗口时长统计）")
         app_title.setObjectName("muted")
         app_layout.addWidget(app_title)
+        self.app_title = app_title
         self.app_bars = ReasonBars(
             empty_text="还没有记录——完成一次专注就会看到你的时间去哪儿了",
             value_fmt=_fmt_usage)
@@ -436,6 +469,7 @@ class StatsView(QWidget):
         category_title = QLabel("计时分类分布（近 30 天专注分钟）")
         category_title.setObjectName("muted")
         category_layout.addWidget(category_title)
+        self.category_title = category_title
         self.category_bars = ReasonBars(
             empty_text="还没有记录——开始专注时选一个分类试试",
             value_fmt=_fmt_minutes)
@@ -548,16 +582,7 @@ class StatsView(QWidget):
         self.card_rate.set_value(f"{rate:.0%}")
         daily = dict(self._store.daily_focus_minutes(60))
         self.bar_chart.set_data(daily, 30)
-        self.reason_bars.set_rows(
-            [(r["reason"], r["n"])
-             for r in self._store.distraction_reason_counts(30)])
-        # 应用使用：秒 -> 分钟
-        self.app_bars.set_rows(
-            [(r["process"], r["s"] / 60.0)
-             for r in self._store.top_app_usage(30, 8)])
-        # 分类分布
-        self.category_bars.set_rows(
-            [(r["cat"], r["m"]) for r in self._store.category_minutes(30)])
+        self._refresh_detail()
         # 热力图
         self.heatmap.set_rows(self._store.weekday_hour_minutes(90))
         # 周趋势
@@ -586,6 +611,35 @@ class StatsView(QWidget):
             self.week_compare.setText("还没有足够数据，先专注一个番茄吧")
             self.week_compare.setStyleSheet("")
         self._refresh_review(daily)
+
+    # ---------- 概览：30 天汇总 / 单日详情 ----------
+    def _select_day(self, day: str | None) -> None:
+        """day=None 回到近 30 天汇总；否则下方三块切到该日。"""
+        self._selected_day = day
+        self._refresh_detail()
+
+    def _refresh_detail(self) -> None:
+        day = self._selected_day
+        self.bar_chart.set_selected(day)
+        self.btn_all30.setText("✓ 近 30 天" if day is None else "近 30 天")
+        if day is None:
+            scope = "近 30 天"
+        else:
+            scope = date.fromisoformat(day).strftime("%m-%d") + " 当天"
+        self.reason_title.setText(f"分心原因排行（{scope}）")
+        self.app_title.setText(
+            f"专注期间应用使用 Top 8（{scope}，按前台窗口时长统计）")
+        self.category_title.setText(f"计时分类分布（{scope}专注分钟）")
+        self.reason_bars.set_rows(
+            [(r["reason"], r["n"])
+             for r in self._store.distraction_reason_counts(30, day=day)])
+        # 应用使用：秒 -> 分钟
+        self.app_bars.set_rows(
+            [(r["process"], r["s"] / 60.0)
+             for r in self._store.top_app_usage(30, 8, day=day)])
+        self.category_bars.set_rows(
+            [(r["cat"], r["m"])
+             for r in self._store.category_minutes(30, day=day)])
 
     def _refresh_review(self, daily: dict[str, float]) -> None:
         today = date.today()
