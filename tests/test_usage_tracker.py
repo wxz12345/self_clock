@@ -87,3 +87,47 @@ def test_min_seconds_threshold(env):
     assert store.rows == []               # 不足门槛不落库
     tr.end(1, min_seconds=0.05)
     assert store.totals() == {"tiny.exe": 0.3}   # 收尾门槛放低后零头也保留
+
+
+def test_paused_time_is_not_counted(env):
+    store, clock, tr = env
+    tr.begin(1)
+    tr.on_sample(1, "code.exe", 1010)       # 0~10s 归 code
+    clock.t = 1020
+    tr.pause(1)                              # 暂停时结算：1010→1020 共 10s 归 code
+    assert tr.paused
+    tr.on_sample(1, "game.exe", 1100)        # 暂停期间的采样（迟到/残留）一律忽略
+    clock.t = 1300
+    tr.flush(1)                              # 暂停中 flush 为空操作
+    tr.resume()                              # 从 1300 起重新起算
+    assert not tr.paused
+    tr.on_sample(1, "chrome.exe", 1310)      # 恢复后首个采样：1300→1310 归 chrome
+    clock.t = 1315
+    tr.end(1)                                # 1310→1315 归 chrome
+    assert store.totals() == {"code.exe": 20, "chrome.exe": 15}
+
+
+def test_pause_resume_are_idempotent_and_session_scoped(env):
+    store, clock, tr = env
+    tr.begin(1)
+    tr.pause(2)                              # 不是被跟踪的会话：无效
+    assert not tr.paused
+    tr.pause(1)
+    tr.pause(1)                              # 重复暂停无副作用
+    clock.t = 1050
+    tr.resume()
+    tr.resume()                              # 重复恢复无副作用
+    tr.end(1)
+    assert store.rows == []                  # 整段没有任何采样，不应产生记录
+
+
+def test_begin_clears_previous_paused_state(env):
+    store, clock, tr = env
+    tr.begin(1)
+    tr.pause(1)
+    tr.begin(2)                              # 新会话不应继承“已暂停”
+    assert not tr.paused
+    tr.on_sample(2, "a.exe", 1010)
+    clock.t = 1010
+    tr.end(2)
+    assert store.totals() == {"a.exe": 10}

@@ -59,3 +59,16 @@ def test_no_foreground_means_no_sample(mon, monkeypatch):
     _fg(monkeypatch, None)
     mon._check_once()
     assert mon._samples == []
+
+
+@pytest.mark.parametrize("keyword,process", [
+    ("STEAM", "steam.exe"),             # 关键词大写、进程名小写
+    ("steam", "STEAM.EXE"),             # 进程名全大写
+    ("SteaM", "sTeAmWebHelper.exe"),    # 混合大小写 + 子串
+    ("微信", "微信.EXE"),                # 非 ASCII 同样不区分大小写
+])
+def test_matching_is_case_insensitive_both_ways(mon, monkeypatch, keyword, process):
+    mon.set_blacklist([keyword])
+    _fg(monkeypatch, process)
+    mon._check_once()
+    assert mon._hits == [process]       # 上报的是原始进程名，保留原有大小写

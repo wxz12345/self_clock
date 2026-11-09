@@ -15,10 +15,12 @@ class TrayController(QSystemTrayIcon):
         self.act_show = QAction("显示主窗口", self)
         self.act_toggle = QAction("开始专注", self)
         self.act_mini = QAction("显示迷你窗", self)
+        self.act_theme = QAction("切换为浅色主题", self)
         self.act_quit = QAction("退出", self)
         self.menu.addAction(self.act_show)
         self.menu.addAction(self.act_toggle)
         self.menu.addAction(self.act_mini)
+        self.menu.addAction(self.act_theme)
         self.menu.addSeparator()
         self.menu.addAction(self.act_quit)
         self.setContextMenu(self.menu)
@@ -32,6 +34,11 @@ class TrayController(QSystemTrayIcon):
                       QSystemTrayIcon.MiddleClick):
             if self.parent() is not None:
                 self.parent().showNormal()
+
+    def set_theme_label(self, current_theme: str) -> None:
+        """菜单项文字写“点击后会变成什么”：当前深色 → 切换为浅色，反之亦然。"""
+        self.act_theme.setText(
+            "切换为浅色主题" if current_theme == "dark" else "切换为深色主题")
 
     def notify(self, title: str, body: str, msecs: int = 5000) -> None:
         if self.isVisible():

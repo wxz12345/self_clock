@@ -5,8 +5,18 @@ import json
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QPushButton, QScrollArea, QSpinBox,
+                               QPushButton, QScrollArea, QSlider, QSpinBox,
                                QVBoxLayout, QWidget)
+
+
+MINI_OPACITY_RANGE = (30, 100)
+
+
+class _NoWheelSlider(QSlider):
+    """滚轮不改值（让滚轮继续滚动设置页，避免误触）；拖动或方向键调整。"""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
 
 
 CLOSE_OPTIONS = [("每次询问", "ask"), ("最小化到托盘", "tray"), ("直接退出", "exit")]
@@ -22,6 +32,7 @@ class SettingsView(QWidget):
     clear_data_requested = Signal()
     theme_changed = Signal(str)        # dark / light
     autostart_changed = Signal(bool)
+    mini_opacity_changed = Signal(int)  # 迷你窗透明度百分比（实时生效并保存）
 
     def __init__(self, store, data_dir: str, parent=None):
         super().__init__(parent)
@@ -119,6 +130,23 @@ class SettingsView(QWidget):
         behavior_layout.addWidget(self.auto_break_check)
         behavior_layout.addWidget(self.autostart_check)
         behavior_layout.addWidget(self.update_check)
+        opacity_row = QHBoxLayout()
+        opacity_label = QLabel("迷你窗透明度")
+        opacity_label.setObjectName("muted2")
+        self.mini_opacity_slider = _NoWheelSlider(Qt.Horizontal)
+        self.mini_opacity_slider.setRange(*MINI_OPACITY_RANGE)
+        self.mini_opacity_slider.setSingleStep(5)
+        self.mini_opacity_slider.setPageStep(10)
+        self.mini_opacity_slider.setMaximumWidth(260)
+        self.mini_opacity_slider.setToolTip("拖动即时预览，自动保存")
+        self.mini_opacity_value = QLabel("100%")
+        self.mini_opacity_value.setMinimumWidth(44)
+        self.mini_opacity_slider.valueChanged.connect(self._on_mini_opacity_slider)
+        opacity_row.addWidget(opacity_label)
+        opacity_row.addWidget(self.mini_opacity_slider)
+        opacity_row.addWidget(self.mini_opacity_value)
+        opacity_row.addStretch(1)
+        behavior_layout.addLayout(opacity_row)
         close_row = QHBoxLayout()
         close_label = QLabel("点击窗口 ✕ 关闭时")
         close_label.setObjectName("muted2")
@@ -168,11 +196,13 @@ class SettingsView(QWidget):
         bl_title = QLabel("分心程序黑名单")
         bl_title.setObjectName("title")
         bl_layout.addWidget(bl_title)
-        bl_hint = QLabel("填写进程名关键词，专注期间检测到这些程序位于前台时提醒并记录。"
-                         "如：steam、cloudmusic、bilibili（温和模式：只提醒记录，不会关闭程序）")
+        bl_hint = QLabel("填写进程名关键词（不区分大小写，按进程名包含匹配），专注期间检测到这些程序位于前台时"
+                         "记录为分心；暂停期间不检测。如：steam、cloudmusic（温和模式：不会关闭程序）")
         bl_hint.setObjectName("muted2")
         bl_hint.setWordWrap(True)
         bl_layout.addWidget(bl_hint)
+        self.blacklist_notify_check = QCheckBox("命中时弹出托盘提醒（同一关键词 5 分钟内只提醒一次）")
+        bl_layout.addWidget(self.blacklist_notify_check)
         self.blacklist_list = QListWidget()
         self.blacklist_list.setFixedHeight(120)
         bl_layout.addWidget(self.blacklist_list)
@@ -251,6 +281,8 @@ class SettingsView(QWidget):
         self.sound_check.setChecked(s.get_int("sound_enabled", 1) == 1)
         self.auto_break_check.setChecked(s.get_int("auto_start_breaks", 1) == 1)
         self.update_check.setChecked(s.get_int("update_check_enabled", 0) == 1)
+        self.blacklist_notify_check.setChecked(s.get_int("blacklist_notify", 1) == 1)
+        self.set_mini_opacity(s.get_int("mini_opacity", 100))
         close_index = self.close_combo.findData(s.get_setting("close_action", "ask"))
         self.close_combo.setCurrentIndex(close_index if close_index >= 0 else 0)
         self.blacklist_list.clear()
@@ -270,6 +302,27 @@ class SettingsView(QWidget):
         # 注册表为准
         from core import autostart
         self.autostart_check.setChecked(autostart.is_enabled())
+
+    def set_mini_opacity(self, percent: int) -> None:
+        """外部（如迷你窗右键菜单）改了透明度时同步滑块，不再回发信号。"""
+        lo, hi = MINI_OPACITY_RANGE
+        percent = max(lo, min(hi, int(percent)))
+        self.mini_opacity_slider.blockSignals(True)
+        self.mini_opacity_slider.setValue(percent)
+        self.mini_opacity_slider.blockSignals(False)
+        self.mini_opacity_value.setText(f"{percent}%")
+
+    def _on_mini_opacity_slider(self, value: int) -> None:
+        self.mini_opacity_value.setText(f"{value}%")
+        self.mini_opacity_changed.emit(value)
+
+    def set_theme(self, name: str) -> None:
+        """外部（如托盘菜单）切换了主题时同步下拉框，不再回发信号。"""
+        index = self.theme_combo.findData(name)
+        if index >= 0:
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.setCurrentIndex(index)
+            self.theme_combo.blockSignals(False)
 
     def _on_theme_combo(self, index: int) -> None:
         self.theme_changed.emit(self.theme_combo.itemData(index))
@@ -298,6 +351,7 @@ class SettingsView(QWidget):
             "sound_enabled": 1 if self.sound_check.isChecked() else 0,
             "auto_start_breaks": 1 if self.auto_break_check.isChecked() else 0,
             "update_check_enabled": 1 if self.update_check.isChecked() else 0,
+            "blacklist_notify": 1 if self.blacklist_notify_check.isChecked() else 0,
             "close_action": self.close_combo.currentData(),
             "break_reminder_enabled": 1 if self.reminder_check.isChecked() else 0,
             "break_reminder_min": self.reminder_min_spin.value(),

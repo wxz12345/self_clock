@@ -210,10 +210,13 @@ class MainWindow(QMainWindow):
         sv.clear_data_requested.connect(self._on_clear_data)
         sv.theme_changed.connect(self._on_theme_changed)
         sv.autostart_changed.connect(autostart.set_enabled)
+        sv.mini_opacity_changed.connect(self._on_mini_opacity)
 
         self.tray.act_show.triggered.connect(self.showNormal)
         self.tray.act_toggle.triggered.connect(self._tray_toggle)
         self.tray.act_mini.triggered.connect(self._toggle_mini)
+        self.tray.act_theme.triggered.connect(self._toggle_theme)
+        self.tray.set_theme_label(theme.NAME)
         self.tray.act_quit.triggered.connect(self._quit)
 
     # ================= 页面切换 =================
@@ -401,6 +404,7 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
         self._update_tray()
         self._refresh_overlay()
+        self._sync_usage_pause()
 
     def showEvent(self, event) -> None:
         """主窗口显示时自动收起迷你窗，避免两者重叠（文字透出）。"""
@@ -640,6 +644,7 @@ class MainWindow(QMainWindow):
 
     def _on_mini_opacity(self, percent: int) -> None:
         self.store.set_setting("mini_opacity", percent)
+        self.settings_view.set_mini_opacity(percent)   # 与迷你窗右键菜单双向同步
         if self.mini_grip is not None:
             self.mini_grip.set_opacity(percent)
         if self.mini_controls is not None:
@@ -704,6 +709,7 @@ class MainWindow(QMainWindow):
         self.focus_view.set_stopwatch(elapsed, running, paused)
         self._refresh_overlay()
         self._update_tray()
+        self._sync_usage_pause()
 
     def _on_stopwatch_stop(self) -> None:
         """停止并记录本次顺计时。"""
@@ -762,6 +768,13 @@ class MainWindow(QMainWindow):
         for widget in app.allWidgets():
             widget.update()
         self.store.set_setting("theme", name)
+        # 设置页下拉框与托盘菜单文字跟着当前主题走（无论从哪里切换）
+        self.settings_view.set_theme(name)
+        self.tray.set_theme_label(name)
+
+    def _toggle_theme(self) -> None:
+        """托盘菜单：在深色 / 浅色之间切换。"""
+        self._on_theme_changed("light" if theme.NAME == "dark" else "dark")
 
     def _configure_break_reminder(self) -> None:
         enabled = self.store.get_int("break_reminder_enabled", 0) == 1
@@ -836,6 +849,24 @@ class MainWindow(QMainWindow):
         self.monitor.set_scanning(False)
         self.usage.end(self.session_id)
 
+    def _sync_usage_pause(self) -> None:
+        """专注暂停时停止前台窗口采样与应用使用累计，恢复时重新起算。
+        暂停/恢复的所有入口（按钮、迷你窗、托盘、放弃确认弹窗）最终都会触发
+        计时器的 state_changed，所以在那里统一同步一次。"""
+        if not self.usage.is_tracking(self.session_id):
+            return
+        paused = (not self.stopwatch.running) if self.stopwatch_mode \
+            else self.timer.paused
+        was_paused = self.usage.paused
+        if paused:
+            self.usage.pause(self.session_id)
+        else:
+            self.usage.resume()
+        # 只在暂停状态真正变化时切换监控：set_scanning(True) 会清空黑名单的
+        # 5 分钟去重表，而 state_changed 在改设置等场景也会被触发
+        if self.usage.paused != was_paused:
+            self.monitor.set_scanning(not paused)
+
     def _on_fg_sample(self, process_name: str, sampled_at: float) -> None:
         self.usage.on_sample(
             self.session_id, self._normalize_process_name(process_name),
@@ -846,11 +877,14 @@ class MainWindow(QMainWindow):
         self.usage.flush(self.session_id, min_seconds)
 
     def _on_blacklist_hit(self, process_name: str) -> None:
-        """黑名单命中：静默落库（统计页可见），不弹系统通知。"""
+        """黑名单命中：落库（统计页可见），并按设置弹一条托盘提醒；不关闭程序。"""
         if not self.usage.is_tracking(self.session_id):
             return
         self.store.add_distraction(self.session_id,
                                    f"黑名单程序：{process_name}", "", "blacklist")
+        if self.store.get_int("blacklist_notify", 1) == 1:
+            self.tray.notify("⚠️ 检测到分心程序",
+                             f"{process_name} 在前台，回到专注吧～", 4000)
 
     # ================= 设置 =================
     def _apply_settings_to_runtime(self) -> None:

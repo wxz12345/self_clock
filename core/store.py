@@ -33,6 +33,7 @@ DEFAULTS = {
     "break_reminder_enabled": "0",   # 规律性久坐提醒
     "break_reminder_min": "60",
     "break_reminder_text": "站起来活动活动，记得多喝水 🚰",
+    "blacklist_notify": "1",         # 黑名单命中时弹托盘提醒
     "update_check_enabled": "0",    # 启动时检查新版本（联网，默认关闭）
 }
 

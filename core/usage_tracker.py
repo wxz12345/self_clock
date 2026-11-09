@@ -16,6 +16,7 @@ class UsageTracker:
         self._acc: dict[str, float] = {}
         self._last_name: str | None = None
         self._last_ts: float = 0.0
+        self._paused = False
 
     # ---------- 生命周期 ----------
     @property
@@ -27,11 +28,31 @@ class UsageTracker:
         return (current_session_id is not None
                 and current_session_id == self._session_id)
 
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
     def begin(self, session_id: int | None) -> None:
         self._session_id = session_id
+        self._paused = False
         self._acc.clear()
         self._last_name = None
         self._last_ts = self._clock()
+
+    def pause(self, current_session_id: int | None) -> None:
+        """专注暂停：先把暂停前的时长结算落库，之后到恢复前不再累计。"""
+        if not self.is_tracking(current_session_id) or self._paused:
+            return
+        self.flush(current_session_id, 0.05)
+        self._paused = True
+
+    def resume(self) -> None:
+        """专注恢复：从此刻重新起算，暂停期间的时间不计入任何进程。"""
+        if not self._paused:
+            return
+        self._paused = False
+        self._last_ts = self._clock()
+        self._last_name = None
 
     def end(self, current_session_id: int | None, min_seconds: float = 0.05) -> None:
         """最终结算并停止跟踪；必须在会话 id 置空之前调用。"""
@@ -41,7 +62,7 @@ class UsageTracker:
     # ---------- 采样与落库 ----------
     def on_sample(self, current_session_id: int | None, name: str,
                   sampled_at: float) -> None:
-        if not self.is_tracking(current_session_id):
+        if not self.is_tracking(current_session_id) or self._paused:
             return
         if sampled_at <= self._last_ts:
             # 采样在 flush 之前生成、却因信号排队滞后到达：这段时间已经
@@ -59,7 +80,7 @@ class UsageTracker:
               min_seconds: float = 0.5) -> None:
         """把累计时长以增量写入数据库；可反复调用，不会重复计数。
         min_seconds 是写入门槛，收尾场景放低到 0.05 秒。"""
-        if not self.is_tracking(current_session_id):
+        if not self.is_tracking(current_session_id) or self._paused:
             return
         now = self._clock()
         if self._last_name:
