@@ -21,5 +21,10 @@ preview/
 *.log
 assets/noise/pure_thunder.mp3
 
+# 白噪音素材不入库（v2.1.0 起）：独立 Release 资产分发，见 scripts/noise_pack.py
+# 旧 tag（v1.x / v2.0.0）与历史提交里仍含 mp3，保持原样；manifest.json 入库
+assets/noise/*.mp3
+assets/noise/*.wav
+
 # WorkBuddy 本地工作数据（含本机路径的笔记，绝不入库）
 .workbuddy/

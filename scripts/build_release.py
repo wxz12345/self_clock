@@ -60,6 +60,18 @@ def main() -> None:
         with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tf:
             tf.extractall(build_dir)
 
+        # v2.1.0 起 mp3 不入库：tag 里带有 manifest.json 时，先把素材补齐
+        # （本地完整则复制，否则从 noise-assets-v1 下载并校验）。
+        # 旧 tag（v1.x / v2.0.0）本身内含 mp3、没有 manifest，原样处理。
+        noise_dest = os.path.join(build_dir, "assets", "noise")
+        if os.path.exists(os.path.join(noise_dest, "manifest.json")):
+            sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+            import noise_pack
+            print(f"[{tag}] 补齐白噪音素材...", flush=True)
+            noise_pack.ensure(noise_dest,
+                              local_dir=os.path.join(REPO_ROOT, "assets", "noise"),
+                              progress=lambda m: print(f"[{tag}] {m}", flush=True))
+
         print(f"[{tag}] PyInstaller 构建...", flush=True)
         run([
             "conda", "run", "-n", CONDA_ENV, "--no-capture-output",

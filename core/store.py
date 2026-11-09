@@ -33,6 +33,7 @@ DEFAULTS = {
     "break_reminder_enabled": "0",   # 规律性久坐提醒
     "break_reminder_min": "60",
     "break_reminder_text": "站起来活动活动，记得多喝水 🚰",
+    "update_check_enabled": "0",    # 启动时检查新版本（联网，默认关闭）
 }
 
 SCHEMA = """
@@ -529,6 +530,16 @@ class Store:
         self.conn.commit()
         b.close()
         return stats
+
+    def app_usage_daily_for_export(self):
+        """应用使用按天汇总（历史汇总表 + 今天的明细），按日期、时长降序。"""
+        return self.conn.execute(
+            "SELECT day, process, SUM(s) AS seconds FROM ("
+            " SELECT day, process, seconds AS s FROM app_usage_daily"
+            " UNION ALL"
+            " SELECT date(ts, 'unixepoch', 'localtime') AS day, process,"
+            "  seconds AS s FROM app_usage"
+            ") GROUP BY day, process ORDER BY day DESC, seconds DESC").fetchall()
 
     def sessions_for_export(self):
         return self.conn.execute(

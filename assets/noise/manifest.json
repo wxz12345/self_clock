@@ -1,0 +1,72 @@
+{
+  "files": {
+    "birds.mp3": {
+      "sha256": "62dae561aa0de419c19bc4be7792fa350a03c8f0688b5e7b4c1d7cacf96241c2",
+      "size": 4309056
+    },
+    "brown.mp3": {
+      "sha256": "225c424d7d7ff9d8ba37e9a043b52548c638d965fe6b5f05159d4a13439ef3f8",
+      "size": 4573530
+    },
+    "cafe.mp3": {
+      "sha256": "7ca3a933d43ca6ad475f0c444414b5cd236f007d5801c5621721d4bbf2f5f315",
+      "size": 4332000
+    },
+    "crickets.mp3": {
+      "sha256": "84551a0cc40483746609409f6ba252284ad1319d513a6211dbff7fd370b0718f",
+      "size": 13783040
+    },
+    "fire.mp3": {
+      "sha256": "a6fb4e77eba072dc3b870c77456960703209702c88cdcb02f23ad8b5130bc878",
+      "size": 3838537
+    },
+    "pure_rain1.mp3": {
+      "sha256": "44f7bc2f74aa83af636e117911c7e36d9a2424ecfd55e60a912f445864c9abe6",
+      "size": 13653352
+    },
+    "pure_rain2.mp3": {
+      "sha256": "e8866f8e225b07661b7c45990e1beb37fa83ccffc37ef21661bda8efa8216d71",
+      "size": 13705216
+    },
+    "pure_rain3.mp3": {
+      "sha256": "7f56a23d2390f9a14497cfb6147ab57cdf50bdd1189b38c448096fffac6f1dbd",
+      "size": 13653352
+    },
+    "rain.mp3": {
+      "sha256": "240e36353cc15980862ea6c6de72d625594e0da23f19f357ab62c7eaa04e87a9",
+      "size": 2877072
+    },
+    "storm1.mp3": {
+      "sha256": "a88fd770f1634ea54239cdc3b5d9260d153aafe0346575bd4ad37938b8c60658",
+      "size": 9033064
+    },
+    "storm2.mp3": {
+      "sha256": "61ba3de1ffd5856971c5d50652309ac7a9294fbbf58efc075f541a2e38de46e0",
+      "size": 10379712
+    },
+    "storm3.mp3": {
+      "sha256": "06d60f53d58600a0e0743873ecfb426735d221e56a59c864385463e355c4dc80",
+      "size": 13630852
+    },
+    "storm4.mp3": {
+      "sha256": "99cac9650b261bdaee962f061d21e2d3cf5576ca8509141a2ffd998f87e0fb72",
+      "size": 13783040
+    },
+    "storm5.mp3": {
+      "sha256": "f2645e43287b1603b7929d56ca93eae7c75e64b6d8f1e2e27a004a9dede56f94",
+      "size": 13708676
+    },
+    "waves.mp3": {
+      "sha256": "efc407a0108bbe42236abdf39b6ad8989cad3466357d2ef02ec1ca6f413ef894",
+      "size": 4567040
+    },
+    "wind.mp3": {
+      "sha256": "926c141f6ed2f96eabc4a2f795d21143ce2ec610e2e69fe0466d6f4a93aa59ef",
+      "size": 4593000
+    }
+  },
+  "url": "https://github.com/wxz12345/self_clock/releases/download/noise-assets-v1/noise-assets-v1.zip",
+  "version": "noise-assets-v1",
+  "zip_sha256": "db5c7e579f69bf68fc5d84ac5370430c4498d0ae5db82cc16e55741c595b3e2e",
+  "zip_size": 144422103
+}

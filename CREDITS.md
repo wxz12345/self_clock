@@ -13,6 +13,10 @@
 全部来自 [Freesound.org](https://freesound.org)（128kbps MP3 预览规格）与
 [RainyBird](https://github.com/Everloom-129/RainyBird) 仓库（MIT）。
 
+**分发方式（v2.1.0 起）**：mp3 不再提交进仓库，而是打成 `noise-assets-v1.zip` 作为单独的 Release 资产，
+仓库内 `assets/noise/manifest.json` 记录每个文件的 sha256；发布版 zip 内仍然包含这些文件，
+许可证与署名要求不变。
+
 **开源发布提示**：除纯雷声为 NC（禁止商用）外，其余均为 CC0 / CC-BY / MIT，可随项目分发；
 CC-BY 条目分发时保留本文件即为署名。
 
@@ -30,7 +34,7 @@ CC-BY 条目分发时保留本文件即为署名。
 | pure_thunder.mp3 | 纯雷声 | [Thunderstorm_June](https://freesound.org/s/338374/) by DaveOfDefeat2248 | **CC-BY-NC**（仅限个人使用；**未随本仓库与安装包分发**，作者本地自用） | 18 min |
 | crickets.mp3 | 虫鸣 | [Frogs and birds chirping in the fields at midnight after a rain](https://freesound.org/s/746877/) by lastraindrop | CC0 | 12 min |
 | waves.mp3 | 海浪 | [Waves and birdsong](https://freesound.org/s/144164/) by juskiddink | CC-BY 4.0 | 10 min |
-| fire.mp3 | 篝火 | [RainyBird](https://github.com/Everloom-129/RainyBird) `sounds/fireplace-with-crackling-sounds.mp3` | MIT（随仓库） | ~4 min |
+| fire.mp3 | 篝火 | [RainyBird](https://github.com/Everloom-129/RainyBird) `sounds/fireplace-with-crackling-sounds.mp3` | MIT（随素材包） | ~4 min |
 | wind.mp3 | 风声 | [winter ambience leaves, wind, crow, birds](https://freesound.org/s/263492/) by lwdickens | CC0 | ~8 min |
 | birds.mp3 | 鸟鸣 | [End Summer forest NL](https://freesound.org/s/245774/) by klankbeel | CC-BY 4.0 | ~7 min |
 | cafe.mp3 | 咖啡馆 | [Ambience Coffee Shop 1](https://freesound.org/s/233280/) by JarredGibb | CC0 | ~7 min |

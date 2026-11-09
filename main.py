@@ -45,6 +45,41 @@ def _resolve_data_dir() -> str:
 
 DATA_DIR = _resolve_data_dir()
 CRASH_LOG_MAX_BYTES = 1_000_000
+EXIT_WATCHDOG_SEC = 8.0
+
+
+def _setup_logging() -> None:
+    """应用日志：data/app.log，单文件 512KB、保留 2 份轮转。"""
+    import logging
+    from logging.handlers import RotatingFileHandler
+    try:
+        handler = RotatingFileHandler(
+            os.path.join(DATA_DIR, "app.log"), maxBytes=512_000,
+            backupCount=2, encoding="utf-8")
+    except OSError:
+        return
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+
+
+def _arm_exit_watchdog() -> None:
+    """退出看门狗：开始退出后若进程在 EXIT_WATCHDOG_SEC 内没结束
+    （音频/监控线程卡住），强制结束，避免残留僵死进程占住单实例管道。"""
+    import logging
+    import threading
+
+    def _kill() -> None:
+        logging.getLogger("exit").error(
+            "退出超过 %.0fs 仍未结束，强制终止进程", EXIT_WATCHDOG_SEC)
+        logging.shutdown()
+        os._exit(0)
+
+    t = threading.Timer(EXIT_WATCHDOG_SEC, _kill)
+    t.daemon = True
+    t.start()
 
 
 def _install_crash_logger() -> None:
@@ -84,7 +119,9 @@ def _another_instance_running() -> bool:
 
 def main() -> int:
     _install_crash_logger()
+    _setup_logging()
     app = QApplication(sys.argv)
+    app.aboutToQuit.connect(_arm_exit_watchdog)
     app.setApplicationName("自律番茄钟")
     app.setApplicationDisplayName("自律番茄钟")
 
@@ -147,6 +184,8 @@ def main() -> int:
         store.close()
     except Exception:
         pass
+    import logging
+    logging.shutdown()
     os._exit(code)
     return code
 

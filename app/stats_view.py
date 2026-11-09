@@ -4,7 +4,8 @@ import math
 from datetime import date, timedelta
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import (QBrush, QColor, QFont, QKeySequence, QPainter,
+                           QPen, QShortcut)
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QPushButton, QScrollArea, QTabWidget, QToolTip,
                                QVBoxLayout, QWidget)
@@ -381,6 +382,13 @@ class StatsView(QWidget):
         title.setObjectName("title")
         root.addWidget(title)
 
+        # 键盘：←/→ 在 30 天内逐日切换，Esc 回到 30 天汇总
+        for key, handler in (("Left", lambda: self._step_day(-1)),
+                             ("Right", lambda: self._step_day(1)),
+                             ("Esc", lambda: self._select_day(None))):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(Qt.WindowShortcut)   # 页面可见时即生效，不要求焦点在页内
+            sc.activated.connect(handler)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._scrollable(self._build_overview_tab()), "概览")
         self.tabs.addTab(self._scrollable(self._build_weekly_tab()), "周趋势")
@@ -424,7 +432,7 @@ class StatsView(QWidget):
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(16, 12, 16, 10)
         chart_head = QHBoxLayout()
-        chart_title = QLabel("近 30 天专注分钟（点击某一天的柱子查看当天详情）")
+        chart_title = QLabel("近 30 天专注分钟（点击柱子或按 ←/→ 查看当天，Esc 回汇总）")
         chart_title.setObjectName("muted")
         chart_head.addWidget(chart_title)
         chart_head.addStretch(1)
@@ -617,6 +625,19 @@ class StatsView(QWidget):
         """day=None 回到近 30 天汇总；否则下方三块切到该日。"""
         self._selected_day = day
         self._refresh_detail()
+
+    def _step_day(self, delta: int) -> None:
+        """在近 30 天内逐日移动选中日；从汇总视图按 ← 进入今天，按 → 无效。"""
+        if self.tabs.currentIndex() != 0:
+            return
+        today = date.today()
+        if self._selected_day is None:
+            if delta < 0:
+                self._select_day(today.isoformat())
+            return
+        day = date.fromisoformat(self._selected_day) + timedelta(days=delta)
+        if today - timedelta(days=29) <= day <= today:
+            self._select_day(day.isoformat())
 
     def _refresh_detail(self) -> None:
         day = self._selected_day

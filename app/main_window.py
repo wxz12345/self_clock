@@ -5,6 +5,7 @@ store 的所有写操作都集中在这里调度（视图只发信号），core 
 """
 import csv
 import json
+import logging
 import math
 import os
 import sys
@@ -18,17 +19,21 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog,
                                QVBoxLayout, QWidget)
 
 from core import autostart, gamify
+from core.break_reminder import BreakReminder
 from core.monitor import FrontendMonitor
 from core.reminder import ReminderScheduler
 from core.stopwatch import Stopwatch
 from core.timer import Phase, PomodoroTimer
+from core.update_check import UpdateChecker
+from core.version import __version__
+from core.usage_tracker import UsageTracker
 
 from . import icons, theme
 from .close_dialog import CloseDialog
 from .distraction_dialog import DistractionDialog
 from .focus_view import FocusView
-from .mini_overlay import (CONTROLS_H, MiniControls, MiniGrip, MiniOverlay,
-                           VISUAL_H)
+from .mini_overlay import (CONTROLS_OFFSET, GRIP_OFFSET, MiniControls,
+                           MiniGrip, MiniOverlay)
 from .noise_mixer import NoiseMixerDialog
 from .reminder_popup import ReminderPopup
 from .reminders_view import RemindersView
@@ -36,6 +41,8 @@ from .settings_view import SettingsView
 from .stats_view import StatsView
 from .tasks_view import TasksView
 from .tray import TrayController
+
+log = logging.getLogger(__name__)
 
 NAV_ITEMS = [("🍅", "专注"), ("📋", "任务"), ("⏰", "提醒"),
              ("📊", "统计"), ("⚙️", "设置")]
@@ -71,10 +78,7 @@ class MainWindow(QMainWindow):
         self.overlay: MiniOverlay | None = None
         # 应用使用统计：当前会话的累计秒数。采样结果以「增量」周期性落库，
         # 避免只在会话结束时一次性写入（顺计时/中途查看/异常退出都会丢数据）。
-        self._usage_session_id: int | None = None
-        self._usage_acc: dict[str, float] = {}
-        self._usage_last_name: str | None = None
-        self._usage_last_ts: float = 0.0
+        self.usage = UsageTracker(store)
 
         self._usage_flush_timer = QTimer(self)
         self._usage_flush_timer.setInterval(60_000)
@@ -82,7 +86,11 @@ class MainWindow(QMainWindow):
             lambda: self._flush_app_usage())
         self._usage_flush_timer.start()
 
-        self._reminder_timer = QTimer(self)
+        self._update_checker: UpdateChecker | None = None
+        if store.get_int("update_check_enabled", 0) == 1:
+            QTimer.singleShot(8000, self._check_for_update)   # 启动稳定后再查
+        self.break_reminder = BreakReminder(self)
+        self.break_reminder.fired.connect(self._fire_break_reminder)
         self._configure_break_reminder()
 
         self._build_ui()
@@ -372,7 +380,7 @@ class MainWindow(QMainWindow):
         if self.overlay is not None and self.overlay.isVisible():
             self.overlay.set_display(text, progress, self.timer.phase.value)
             if self.mini_controls is not None:
-                self.mini_controls.set_state_label(self._mini_state_label(self.timer))
+                self.overlay.set_state_label(self._mini_state_label(self.timer))
         self._update_tray(text)
 
     @staticmethod
@@ -420,7 +428,7 @@ class MainWindow(QMainWindow):
             self.mini_controls.abandon_requested.connect(self._on_abandon_requested)
             self.mini_controls.skip_requested.connect(self._on_skip_break)
             self.mini_controls.expand_requested.connect(self._expand_mini)
-            self.mini_controls.opacity_selected.connect(self._on_mini_opacity)
+            self.mini_grip.opacity_selected.connect(self._on_mini_opacity)
             last_op = self.store.get_int("mini_opacity", 100)
             self.overlay.set_opacity(last_op)
             self.mini_grip.set_opacity(last_op)
@@ -455,8 +463,8 @@ class MainWindow(QMainWindow):
         if self.overlay is None:
             return
         x, y = self.overlay.x(), self.overlay.y()
-        self.mini_grip.move(x + 2, y + 2)
-        self.mini_controls.move(x, y + VISUAL_H)
+        self.mini_grip.move(x + GRIP_OFFSET.x(), y + GRIP_OFFSET.y())
+        self.mini_controls.move(x + CONTROLS_OFFSET.x(), y + CONTROLS_OFFSET.y())
 
     def _on_mini_moved(self, pos) -> None:
         """视觉窗被移动（含系统贴边/分屏）→ 把手与按钮行跟随。"""
@@ -464,7 +472,8 @@ class MainWindow(QMainWindow):
 
     def _on_grip_dragged(self, grip_pos) -> None:
         """拖动把手 → 移动视觉窗（它的 moveEvent 会带动其余窗口）。"""
-        self.overlay.move(grip_pos.x() - 2, grip_pos.y() - 2)
+        self.overlay.move(grip_pos.x() - GRIP_OFFSET.x(),
+                          grip_pos.y() - GRIP_OFFSET.y())
 
     def _expand_mini(self) -> None:
         """从迷你模式返回主窗口。"""
@@ -489,7 +498,7 @@ class MainWindow(QMainWindow):
                      ("已暂停" if self.stopwatch.elapsed_seconds() > 0 else "待机"))
             self.overlay.set_display(text, progress, "stopwatch")
             if self.mini_controls is not None:
-                self.mini_controls.set_state_label(label)
+                self.overlay.set_state_label(label)
                 primary = "暂停" if running else ("继续" if self.stopwatch.elapsed_seconds() > 0 else "开始顺计时")
                 self.mini_controls.set_actions(primary, True, running or
                                                self.stopwatch.elapsed_seconds() > 0, False)
@@ -507,7 +516,7 @@ class MainWindow(QMainWindow):
             progress = 0.0
         self.overlay.set_display(text, progress, t.phase.value)
         if self.mini_controls is not None:
-            self.mini_controls.set_state_label(self._mini_state_label(t))
+            self.overlay.set_state_label(self._mini_state_label(t))
         # 按钮状态（与专注页 update_state 一致的映射）
         if not t.running:
             primary = "开始专注" if t.phase == Phase.FOCUS else "开始休息"
@@ -525,7 +534,8 @@ class MainWindow(QMainWindow):
     def _on_mini_drag_moved(self, pos) -> None:
         """拖动视觉窗时联动移动控制窗。"""
         if self.mini_controls is not None:
-            self.mini_controls.move(pos.x(), pos.y() + VISUAL_H)
+            self.mini_controls.move(pos.x() + CONTROLS_OFFSET.x(),
+                                    pos.y() + CONTROLS_OFFSET.y())
 
     def _save_mini_pos(self) -> None:
         if self.overlay is not None:
@@ -632,6 +642,8 @@ class MainWindow(QMainWindow):
         self.store.set_setting("mini_opacity", percent)
         if self.mini_grip is not None:
             self.mini_grip.set_opacity(percent)
+        if self.mini_controls is not None:
+            self.mini_controls.set_opacity(percent)
         if self.overlay is not None:
             self.overlay.set_opacity(percent)
 
@@ -753,12 +765,16 @@ class MainWindow(QMainWindow):
 
     def _configure_break_reminder(self) -> None:
         enabled = self.store.get_int("break_reminder_enabled", 0) == 1
-        minutes = max(5, self.store.get_int("break_reminder_min", 60))
-        self._reminder_timer.stop()
-        if enabled:
-            self._reminder_timer.setInterval(minutes * 60 * 1000)
-            self._reminder_timer.timeout.connect(self._fire_break_reminder)
-            self._reminder_timer.start()
+        minutes = self.store.get_int("break_reminder_min", 60)
+        self.break_reminder.configure(enabled, minutes)
+
+    def _check_for_update(self) -> None:
+        self._update_checker = UpdateChecker(__version__, self)
+        self._update_checker.found.connect(
+            lambda tag, url: self.tray.notify(
+                "🆕 发现新版本", f"{tag} 已发布（当前 v{__version__}），"
+                f"可到 GitHub Releases 下载：{url}"))
+        self._update_checker.start(QThread.LowPriority)
 
     def _fire_break_reminder(self) -> None:
         text = self.store.get_setting("break_reminder_text", "")
@@ -812,71 +828,26 @@ class MainWindow(QMainWindow):
 
     def _begin_usage_tracking(self) -> None:
         """开启一次专注会话的前台窗口采样（番茄 / 顺计时共用入口）。"""
-        self._usage_session_id = self.session_id
-        self._usage_acc.clear()
-        self._usage_last_name = None
-        self._usage_last_ts = time.monotonic()
+        self.usage.begin(self.session_id)
         self.monitor.set_scanning(True)
 
     def _end_usage_tracking(self) -> None:
         """关闭采样并做最终结算；必须在 session_id 置空之前调用。"""
         self.monitor.set_scanning(False)
-        self._flush_app_usage(min_seconds=0.05)
-        self._usage_session_id = None
+        self.usage.end(self.session_id)
 
     def _on_fg_sample(self, process_name: str, sampled_at: float) -> None:
-        """把「上一个采样点 → 本次」的真实时长记到上一个前台进程名下。
-
-        采样时刻由监控线程用 time.monotonic() 生成，因此主线程被模态弹窗
-        或事件循环阻塞、信号排队时，累计时长依然是真实的墙钟时间。
-        """
-        if (self.session_id is None
-                or self.session_id != self._usage_session_id):
-            return
-        name = self._normalize_process_name(process_name)
-        if sampled_at <= self._usage_last_ts:
-            # 采样在 flush 之前生成、却因信号排队滞后到达：这段时间已经
-            # 结算落库，只更新当前进程名，避免下一段把它重复计一次
-            self._usage_last_name = name
-            return
-        owner = self._usage_last_name or name
-        # 首个采样点把「会话开始 → 本次采样」也归给当前进程，不丢开头这段
-        self._usage_acc[owner] = (
-            self._usage_acc.get(owner, 0.0)
-            + max(0.0, sampled_at - self._usage_last_ts))
-        self._usage_last_name = name
-        self._usage_last_ts = sampled_at
+        self.usage.on_sample(
+            self.session_id, self._normalize_process_name(process_name),
+            sampled_at)
 
     def _flush_app_usage(self, min_seconds: float = 0.5) -> None:
-        """把累计时长以增量写入数据库；会话进行中也会被周期调用。
-
-        每次写入的是「距离上次 flush 的增量」，统计页用 SUM(seconds) 聚合，
-        因此反复调用不会重复计数。切到统计页 / 每 60 秒 / 会话结束 / 退出
-        都会触发，采样不再只停留在内存里。min_seconds 是写入门槛，
-        收尾场景放低到 0.05 秒，短会话的零头也能留下。
-        """
-        if (self.session_id is None
-                or self.session_id != self._usage_session_id):
-            return
-        now = time.monotonic()
-        if self._usage_last_name:
-            delta = max(0.0, now - self._usage_last_ts)
-            if delta:
-                self._usage_acc[self._usage_last_name] = (
-                    self._usage_acc.get(self._usage_last_name, 0.0) + delta)
-            # 从这一刻重新起算，下一段不会把已落库的时长重复计入
-            self._usage_last_ts = now
-        if not self._usage_acc:
-            return
-        for name, seconds in self._usage_acc.items():
-            if seconds >= min_seconds:
-                self.store.add_app_usage(self.session_id, name, seconds)
-        self._usage_acc.clear()
+        """增量落库；切到统计页 / 每 60 秒 / 会话结束 / 退出都会触发。"""
+        self.usage.flush(self.session_id, min_seconds)
 
     def _on_blacklist_hit(self, process_name: str) -> None:
         """黑名单命中：静默落库（统计页可见），不弹系统通知。"""
-        if (self.session_id is None
-                or self.session_id != self._usage_session_id):
+        if not self.usage.is_tracking(self.session_id):
             return
         self.store.add_distraction(self.session_id,
                                    f"黑名单程序：{process_name}", "", "blacklist")
@@ -1016,12 +987,25 @@ class MainWindow(QMainWindow):
 
     def _teardown(self) -> None:
         # 兜底：顺计时进行中直接退出等场景，也把剩余采样结算落库
-        self._flush_app_usage(min_seconds=0.05)
-        self.sound.stop_noise()
-        self._save_mini_pos()
-        if self.overlay is not None:
-            self.overlay.hide()
-        self.monitor.stop()
+        # 逐步执行并记录耗时：某一步卡住或抛异常时，app.log 里能看出卡在哪，
+        # 且不会让后面的步骤（尤其是停监控线程）被跳过
+        steps = [
+            ("flush_app_usage", lambda: self._flush_app_usage(min_seconds=0.05)),
+            ("stop_noise", self.sound.stop_noise),
+            ("save_mini_pos", self._save_mini_pos),
+            ("hide_overlay", lambda: self.overlay.hide() if self.overlay is not None else None),
+            ("stop_monitor", self.monitor.stop),
+            ("sound_shutdown", self.sound.shutdown),
+        ]
+        for name, fn in steps:
+            t0 = time.monotonic()
+            try:
+                fn()
+            except Exception:
+                log.exception("退出步骤 %s 失败", name)
+            cost = time.monotonic() - t0
+            if cost > 1.0:
+                log.warning("退出步骤 %s 耗时 %.1fs", name, cost)
 
     # ================= 备份 / 恢复 / 导出 =================
     def _main_py_path(self) -> str:
@@ -1137,6 +1121,13 @@ class MainWindow(QMainWindow):
                 writer.writerow([row["id"], row["session_id"],
                                  _fmt_ts(row["ts"]), row["reason"],
                                  row["note"], row["source"]])
+        usage_path = os.path.join(folder, "应用使用（按天）.csv")
+        with open(usage_path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(["日期", "进程", "时长(分钟)"])
+            for row in self.store.app_usage_daily_for_export():
+                writer.writerow([row["day"], row["process"],
+                                 round(row["seconds"] / 60.0, 1)])
 
     # ================= 其他 =================
     def _close_stale_session(self) -> None:

@@ -109,6 +109,12 @@ class NoiseMixerDialog(QDialog):
 
         self._refresh_rows()
         self._refresh_available()
+        if not any(self.sound.has_noise(n) for n in NOISES):
+            # 从源码运行且还没下载素材时给出明确指引（发布版 zip 已内含素材）
+            self._empty_label.setText(
+                "未找到白噪音素材。从源码运行请先在项目目录执行：\n"
+                "python scripts/noise_pack.py fetch")
+            self._empty_label.show()
 
     # ---------- 数据 ----------
     def _load_mix(self) -> dict:

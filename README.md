@@ -13,8 +13,11 @@ Python + PySide6 构建，数据全部存本地 SQLite，无需登录，离线�
 ```bash
 conda create -y -n self_clock python=3.11
 conda run -n self_clock pip install -r requirements.txt
+python scripts/noise_pack.py fetch   # 下载白噪音素材（v2.1.0 起 mp3 不在仓库里，约 144 MB，会校验 sha256）
 python main.py          # 或双击 启动番茄钟.bat（pythonw，无控制台）
 ```
+
+不下载素材也能运行，只是白噪音混音器里没有可选音色（发布版 zip 已内含素材，无需此步）。
 
 ## 功能一览
 
@@ -28,13 +31,14 @@ python main.py          # 或双击 启动番茄钟.bat（pythonw，无控制台
 | 🔥 目标与连击 | 每日目标番茄数，连续达标 streak 🔥，达标庆祝通知 |
 | 🌳 游戏化 | 完成 1 番茄 +10 金币；树随金币从种子长成大树；专注时随进度生长摇摆 |
 | 🎧 白噪音混音器 | 雨声/雷雨/海浪/篝火/风声/鸟鸣/咖啡馆/棕噪音 **8 大类共 17 种真实录音**（含多个雨声/雷雨变体），多轨叠加、各自音量，专注开始自动接续 |
-| 🎯 迷你窗 | 可拖动置顶小窗，**迷你模式接管**：开始/暂停/放弃/跳过全在迷你窗操作，双击返回主窗口 |
+| 🎯 迷你窗 | **单行药丸形紧凑条**（约 236×48）：小圆环 + 时间 + 状态，▶/⏸、✕ 放弃、⏭ 跳过、⤢ 返回主窗口都是图标按钮；拖左侧点阵移动，**右键点阵可调透明度**；视觉部分点击穿透，不挡下面的窗口 |
 | ⏰ 提醒事项 | 事项/时间/地点/备注 + 提前量；到点弹窗+通知，支持"稍后 5 分钟"，错过自动补发 |
 | 🪑 久坐提醒 | 规律性休息提醒（间隔/内容可自定义），专注再久也别忘了站起来喝水 |
-| 📊 统计 | 概览（30 天柱状图，**点击某天柱子查看当天的应用 Top8 / 分类分布 / 分心原因**，点“✓ 近 30 天”回到汇总）+ 周趋势（8 周柱状图、**时段热力图**）+ **周回顾**报告页 |
+| 📊 统计 | 概览（30 天柱状图，**点击某天柱子查看当天的应用 Top8 / 分类分布 / 分心原因**，点“✓ 近 30 天”回到汇总；**←/→ 逐日切换，Esc 回汇总**）+ 周趋势（8 周柱状图、**时段热力图**）+ **周回顾**报告页 |
 | 🌗 深浅主题 | 设置一键切换深色/浅色，所有自绘控件同步换肤 |
-| 💾 数据安全 | 每日自动备份（保留 14 份）+ 手动备份/恢复/CSV 导出 + 按类清空数据 |
+| 💾 数据安全 | 每日自动备份（保留 14 份）+ 手动备份/恢复/CSV 导出（会话、分心、**应用使用按天**）+ 按类清空数据 |
 | 🔔 托盘常驻 | 点 ✕ 可选"最小化到托盘/退出"并记住选择；tooltip 实时倒计时；**单实例保护**（重复启动唤起已有窗口） |
+| 🆕 更新提示 | 设置页可选开关（**默认关闭**）：启动时只读访问 GitHub Releases 公开接口比对版本号，有新版时托盘通知；不上传任何数据 |
 | 🚀 开机自启 | 设置页开关（注册表 Run 项，默认关闭） |
 
 ## 项目结构
@@ -46,7 +50,9 @@ self_clock/
 ├── requirements.txt
 ├── LICENSE / CREDITS.md # MIT 许可；第三方音频素材许可见 CREDITS
 ├── requirements-dev.txt # 开发依赖（含 pytest）
-├── tests/               # pytest：core 层（timer / store / gamify）
+├── tests/               # pytest：core 层（timer / stopwatch / store / gamify / monitor /
+│                        #   reminder / usage_tracker / break_reminder / update_check / 单实例）
+├── .github/workflows/   # CI：push / PR 时在 Windows 上跑 pytest
 ├── app/                 # PySide6 界面层
 │   ├── main_window.py   # 主窗口：导航 + 所有模块的粘合层
 │   ├── focus_view.py / timer_ring.py / tree_widget.py
@@ -58,11 +64,15 @@ self_clock/
 │   └── theme.py / icons.py
 ├── core/                # 逻辑层（不依赖 UI）
 │   ├── version.py       # 版本号（单一来源）
-│   ├── timer.py / store.py / monitor.py / reminder.py / gamify.py / sound.py
+│   ├── timer.py / stopwatch.py / store.py / monitor.py / reminder.py / gamify.py / sound.py
+│   ├── usage_tracker.py # 专注期间应用使用累计（从主窗口拆出，可单测）
+│   ├── break_reminder.py# 久坐提醒定时器
+│   ├── update_check.py  # 可选的新版本检查
 │   ├── autostart.py     # 开机自启（注册表）
 │   └── backup.py        # 每日自动备份
-├── assets/              # 音效、图标、白噪音素材及生成脚本
-├── scripts/             # 构建 / 发布 / 本地部署脚本
+├── assets/              # 音效、图标及生成脚本
+│   └── noise/           # 白噪音：仅 manifest.json 入库（sha256+下载地址），mp3 单独分发
+├── scripts/             # 构建 / 发布 / 本地部署 / 素材打包（noise_pack.py）脚本
 └── docs/参考功能汇总.md  # 调研的候选功能清单
 ```
 
@@ -84,3 +94,26 @@ python -m pytest tests
 ```
 
 数据默认存放在程序旁的 `data/`；该目录不可写时自动回退到 `%APPDATA%/SelfClock`。
+
+## 稳定性说明
+
+- **退出保护**：退出时按步骤执行（落库 → 停音频 → 存位置 → 停监控线程 → 释放播放器），每步记录耗时与异常；
+  开始退出 8 秒后进程仍未结束会被看门狗强制终止，避免残留僵死进程占住单实例通道。
+- **单实例握手**：第二个实例发出“显示”请求后必须收到存活实例的 `ok` 回复；连得上却无回复
+  （上一个实例异常残留）视为无实例，正常启动。
+- **日志**：`data/app.log`（512 KB × 3 轮转）记录退出步骤与监控异常；`data/crash.log`（1 MB 轮转）记录未捕获崩溃。
+- **数据库**：WAL 模式 + 索引；备份用 SQLite 备份接口，不会漏掉 WAL 中的新数据。
+  今天以前的应用使用明细每次启动时按“天 + 进程”汇总。
+- 已修复的问题清单见各版本 [Release 说明](https://github.com/wxz12345/self_clock/releases)。
+
+## 已知局限
+
+- **进程句柄数偏高尚未定论**：曾观察到一个异常退出的旧版进程挂着 1.2 万多个句柄。
+  对白噪音开关、前台窗口采样做了压测，没有复现出持续泄漏；已做的缓解是同一音色不再重复加载媒体源。
+  如果你长期运行后发现句柄/内存持续增长，欢迎提 issue 并附 `data/app.log`。
+- **`app/main_window.py` 仍有 1100+ 行**：目前只拆出了 usage 跟踪与久坐提醒，其余仍是“粘合层”，后续继续拆分。
+- **仓库体积**：v2.1.0 起白噪音 mp3 不再入库，改为单独的 Release 资产（`noise-assets-v1`），仓库里只留一个
+  几 KB 的 `manifest.json`；构建发布包时自动补齐，所以下载即用的体验不变。为保持已发布版本不变，
+  **没有改写 git 历史**：v1.x / v2.0.0 的 tag 与历史提交里仍含这些 mp3，完整 `git clone` 仍约 140 MB；
+  只想看最新代码可用 `git clone --depth 1`，体积会小很多。
+- 前台窗口检测与开机自启依赖 Windows API，仅支持 Windows。

@@ -121,3 +121,16 @@ def test_merge_from_imports_daily_usage(store, tmp_path):
     stats = store.merge_from(str(tmp_path / "other" / "selfclock.db"))
     assert stats["app_usage"] == 1
     assert store.merge_from(str(tmp_path / "other" / "selfclock.db"))["app_usage"] == 0
+
+
+def test_app_usage_daily_export_merges_summary_and_today(store):
+    today = date.today()
+    y = today - timedelta(days=1)
+    _usage(store, y, "code.exe", 600)
+    store.compact_app_usage()
+    _usage(store, today, "code.exe", 60)
+    _usage(store, today, "code.exe", 30)
+    rows = [(r["day"], r["process"], r["seconds"])
+            for r in store.app_usage_daily_for_export()]
+    assert rows == [(today.isoformat(), "code.exe", 90),
+                    (y.isoformat(), "code.exe", 600)]

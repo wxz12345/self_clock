@@ -114,9 +114,11 @@ class SettingsView(QWidget):
         self.auto_break_check = QCheckBox("专注结束后自动开始休息")
         self.autostart_check = QCheckBox("开机自动启动（写入注册表 Run 项，默认关闭）")
         self.autostart_check.toggled.connect(self.autostart_changed.emit)
+        self.update_check = QCheckBox("启动时检查新版本（联网访问 GitHub，只读，默认关闭）")
         behavior_layout.addWidget(self.sound_check)
         behavior_layout.addWidget(self.auto_break_check)
         behavior_layout.addWidget(self.autostart_check)
+        behavior_layout.addWidget(self.update_check)
         close_row = QHBoxLayout()
         close_label = QLabel("点击窗口 ✕ 关闭时")
         close_label.setObjectName("muted2")
@@ -248,6 +250,7 @@ class SettingsView(QWidget):
         self.goal_spin.setValue(s.get_int("daily_goal", 6))
         self.sound_check.setChecked(s.get_int("sound_enabled", 1) == 1)
         self.auto_break_check.setChecked(s.get_int("auto_start_breaks", 1) == 1)
+        self.update_check.setChecked(s.get_int("update_check_enabled", 0) == 1)
         close_index = self.close_combo.findData(s.get_setting("close_action", "ask"))
         self.close_combo.setCurrentIndex(close_index if close_index >= 0 else 0)
         self.blacklist_list.clear()
@@ -294,6 +297,7 @@ class SettingsView(QWidget):
             "daily_goal": self.goal_spin.value(),
             "sound_enabled": 1 if self.sound_check.isChecked() else 0,
             "auto_start_breaks": 1 if self.auto_break_check.isChecked() else 0,
+            "update_check_enabled": 1 if self.update_check.isChecked() else 0,
             "close_action": self.close_combo.currentData(),
             "break_reminder_enabled": 1 if self.reminder_check.isChecked() else 0,
             "break_reminder_min": self.reminder_min_spin.value(),

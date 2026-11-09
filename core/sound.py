@@ -90,7 +90,11 @@ class SoundPlayer(QObject):
             if path is None:
                 self._levels.pop(name, None)
                 return
-            track["player"].setSource(QUrl.fromLocalFile(path))
+            # 每次 setSource 都会重新打开并解码 mp3，反复开关会累积系统句柄；
+            # 同一音色只在首次（或路径变化时）加载，之后直接 play()
+            url = QUrl.fromLocalFile(path)
+            if track["player"].source() != url:
+                track["player"].setSource(url)
             track["player"].play()
 
     def apply_mix(self, mix: dict) -> None:
@@ -115,6 +119,18 @@ class SoundPlayer(QObject):
         """停掉全部音色播放（列表保留，音量记 0）。"""
         for name in list(self._levels):
             self.set_noise_level(name, 0.0)
+
+    def shutdown(self) -> None:
+        """退出前释放全部播放器：停止、清空媒体源并销毁，避免音频后端线程拖住进程。"""
+        for track in self._tracks.values():
+            player, output = track["player"], track["output"]
+            player.stop()
+            player.setSource(QUrl())
+            player.setAudioOutput(None)
+            player.deleteLater()
+            output.deleteLater()
+        self._tracks.clear()
+        self._levels.clear()
 
     def pause_noise(self) -> None:
         for name in list(self._levels):

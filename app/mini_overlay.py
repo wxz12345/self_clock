@@ -1,37 +1,46 @@
 # -*- coding: utf-8 -*-
-"""迷你窗三窗口结构：
-- MiniOverlay：视觉窗（卡片+圆环+时间），整窗点击穿透（WS_EX_TRANSPARENT），
-  可以直接点击它下面的窗口
-- MiniGrip   ：左上角 26x26 的拖拽把手（可交互），拖动时移动整体
-- MiniControls：按钮行（暂停/放弃/跳过/返回），贴在视觉窗下方
+"""迷你窗：一条紧凑的药丸形计时条（约 236×48），三窗口结构：
+
+- MiniOverlay ：视觉窗（药丸底 + 小圆环 + 时间 + 状态），整窗点击穿透
+  （WS_EX_TRANSPARENT），可以直接点击它下面的窗口
+- MiniGrip    ：左侧拖拽把手（可交互，右键调透明度），拖动时移动整体
+- MiniControls：右侧图标按钮（开始/暂停、放弃、跳过、返回），无自带底色，
+  叠在视觉窗的药丸底上
 
 拆三个窗口的原因：Windows 的 WM_NCHITTEST/HTTRANSPARENT 只在同线程窗口间有效，
 跨进程的局部穿透做不到；WS_EX_TRANSPARENT 是整窗生效。因此把"可交互部分"
-（把手、按钮）各自做成独立窗口，视觉窗保持全穿透。
+（把手、按钮）各自做成独立窗口，视觉窗保持全穿透。三个窗口大小/位置由
+本模块的常量统一决定，主窗口只按 *_OFFSET 摆放。
 """
 import ctypes
 import sys
 
-from PySide6.QtCore import (QPointF, QTimer, QPoint, QRectF, Qt, Signal)
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import (QHBoxLayout, QMenu, QPushButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, Qt, Signal
+from PySide6.QtGui import (QActionGroup, QColor, QFont, QFontMetrics,
+                           QPainter, QPainterPath, QPen, QPolygonF)
+from PySide6.QtWidgets import QAbstractButton, QHBoxLayout, QMenu, QWidget
 
 from . import theme
 
-SIZE_W = 230
-VISUAL_H = 168          # 视觉窗高度（卡片+圆环）
-CONTROLS_H = 44         # 控制窗高度（按钮行）
-GRIP_SIZE = 30          # 拖拽把手窗口尺寸
-RING_D = SIZE_W - 92
-RING_TOP = 18           # 圆环顶部（视觉窗内）
+SIZE_W = 236            # 整条宽度
+VISUAL_H = 48           # 整条高度（三个窗口同高）
+GRIP_W = 22             # 左侧拖拽把手宽度
+CONTROLS_W = 118        # 右侧按钮区宽度
+BTN = 26                # 图标按钮尺寸
+RING_D = 26             # 小圆环直径
+RING_X = GRIP_W + 2     # 圆环左边缘
+TEXT_X = RING_X + RING_D + 9   # 时间文字起点
+
+GRIP_OFFSET = QPoint(0, 0)                          # 相对视觉窗左上角
+CONTROLS_OFFSET = QPoint(SIZE_W - CONTROLS_W, 0)
+
+OPACITY_CHOICES = (100, 85, 70, 55)
 
 IS_WINDOWS = sys.platform == "win32"
 
 GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x80000
 WS_EX_TRANSPARENT = 0x20
-WS_EX_NOACTIVATE = 0x08000000
 
 
 def _set_click_through(hwnd: int) -> None:
@@ -42,8 +51,17 @@ def _set_click_through(hwnd: int) -> None:
         hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
 
 
+def _clamp_opacity(percent: int) -> float:
+    return max(0.15, min(1.0, percent / 100.0))
+
+
+# 透明窗口里 alpha=0 的像素在 Windows 上不接收鼠标；控件底下垫一层
+# 几乎看不见的底色，保证整块区域都能点到/拖到
+_HIT_ALPHA = 1
+
+
 class MiniOverlay(QWidget):
-    """视觉窗：圆环 + 时间，整窗点击穿透。"""
+    """视觉窗：药丸底 + 小圆环 + 时间 + 状态文字，整窗点击穿透。"""
 
     moved = Signal(QPoint)   # 位置变化（含系统移动），供其他窗口跟随
 
@@ -55,6 +73,7 @@ class MiniOverlay(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setFixedSize(SIZE_W, VISUAL_H)
         self._time_text = "--:--"
+        self._state_text = ""
         self._progress = 0.0
         self._color = theme.ACCENT
         self._opacity = 1.0
@@ -66,8 +85,15 @@ class MiniOverlay(QWidget):
         self._color = theme.PHASE_COLORS.get(phase_key, theme.ACCENT)
         self.update()
 
+    def set_state_label(self, label: str) -> None:
+        # 去掉前导的 emoji / 符号（如 "⏱ 顺计时中"），小字号下字形不稳定
+        text = label.lstrip("⏱ ").strip()
+        if text != self._state_text:
+            self._state_text = text
+            self.update()
+
     def set_opacity(self, percent: int) -> None:
-        self._opacity = max(0.15, min(1.0, percent / 100.0))
+        self._opacity = _clamp_opacity(percent)
         self.update()
 
     def enable_click_through(self) -> None:
@@ -83,64 +109,87 @@ class MiniOverlay(QWidget):
         super().moveEvent(event)
         self.moved.emit(self.pos())
 
+    def _fade(self, color: QColor, scale: float = 1.0) -> QColor:
+        c = QColor(color)
+        c.setAlpha(max(0, min(255, int(c.alpha() * self._opacity * scale))))
+        return c
+
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        op = self._opacity
-        card = QColor(theme.OVERLAY[0], theme.OVERLAY[1], theme.OVERLAY[2],
-                      int(theme.OVERLAY[3] * op))
-        p.setPen(Qt.NoPen)
-        p.setBrush(card)
-        p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, VISUAL_H - 8), 18, 18)
+        h = VISUAL_H
 
-        ring_rect = QRectF((SIZE_W - RING_D) / 2, RING_TOP, RING_D, RING_D)
-        track = QPen(self._fade(QColor(theme.CARD_2)), 6)
+        # 药丸底：半透明卡 + 一圈细描边
+        body = QRectF(1, 1, SIZE_W - 2, h - 2)
+        card = QColor(*theme.OVERLAY)
+        p.setBrush(self._fade(card))
+        p.setPen(QPen(self._fade(QColor(theme.BORDER), 0.9), 1))
+        p.drawRoundedRect(body, body.height() / 2, body.height() / 2)
+
+        # 小圆环（底环 + 进度弧）
+        ring = QRectF(RING_X, (h - RING_D) / 2, RING_D, RING_D)
+        width = 3.6
+        track = QPen(self._fade(QColor(theme.BORDER)), width)
         track.setCapStyle(Qt.RoundCap)
         p.setPen(track)
-        p.drawArc(ring_rect, 0, 360 * 16)
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(ring.adjusted(width / 2, width / 2, -width / 2, -width / 2),
+                  0, 360 * 16)
         if self._progress > 0:
-            prog = self._fade(QColor(self._color))
-            pen = QPen(prog, 6)
+            pen = QPen(self._fade(QColor(self._color)), width)
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)
-            p.drawArc(ring_rect, 90 * 16, int(-360 * self._progress * 16))
+            p.drawArc(ring.adjusted(width / 2, width / 2, -width / 2, -width / 2),
+                      90 * 16, int(-360 * self._progress * 16))
 
-        p.setPen(self._fade(QColor(theme.TEXT)))
+        # 时间（两行：大号时间 + 小号状态）；超长（带小时）自动缩小
+        avail = (SIZE_W - CONTROLS_W) - TEXT_X + 4
         font = QFont()
-        font.setPixelSize(24)
         font.setBold(True)
+        font.setPixelSize(20)
+        while font.pixelSize() > 12 and QFontMetrics(font).horizontalAdvance(
+                self._time_text) > avail:
+            font.setPixelSize(font.pixelSize() - 1)
         p.setFont(font)
-        p.drawText(ring_rect, Qt.AlignHCenter | Qt.AlignVCenter,
-                   self._time_text)
-        p.end()
+        p.setPen(self._fade(QColor(theme.TEXT)))
+        time_rect = QRectF(TEXT_X, 6, avail, 23)
+        p.drawText(time_rect, Qt.AlignLeft | Qt.AlignVCenter, self._time_text)
 
-    def _fade(self, color: QColor) -> QColor:
-        c = QColor(color)
-        c.setAlpha(max(0, min(255, int(c.alpha() * self._opacity))))
-        return c
+        if self._state_text:
+            small = QFont()
+            small.setPixelSize(11)
+            p.setFont(small)
+            p.setPen(self._fade(QColor(self._color)))
+            p.drawText(QRectF(TEXT_X, 28, avail, 14),
+                       Qt.AlignLeft | Qt.AlignVCenter, self._state_text)
+        p.end()
 
 
 class MiniGrip(QWidget):
-    """左上角拖拽把手：可交互的小窗口，拖动时移动整个迷你窗。"""
+    """左侧拖拽把手：可交互的透明小窗口，拖动时移动整个迷你窗；右键调透明度。"""
 
     drag_moved = Signal(QPoint)   # 新的左上角坐标（把手的左上角）
     drag_finished = Signal()
+    opacity_selected = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
                             | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(GRIP_SIZE, GRIP_SIZE)
+        self.setFixedSize(GRIP_W, VISUAL_H)
         self.setCursor(Qt.OpenHandCursor)
-        self.setToolTip("拖动移动迷你窗")
+        self.setToolTip("拖动移动迷你窗；右键调整透明度")
         self._drag_offset: QPoint | None = None
-        self._opacity = 1.0
+        self._percent = 100
+        self._hover = False
 
     def set_opacity(self, percent: int) -> None:
-        self._opacity = max(0.15, min(1.0, percent / 100.0))
+        self._percent = percent
+        self.setWindowOpacity(_clamp_opacity(percent))
         self.update()
 
+    # ---------- 拖动 ----------
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._drag_offset = event.globalPosition().toPoint() - self.pos()
@@ -157,90 +206,169 @@ class MiniGrip(QWidget):
             self.setCursor(Qt.OpenHandCursor)
             self.drag_finished.emit()
 
+    def enterEvent(self, event) -> None:
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event) -> None:
+        self._hover = False
+        self.update()
+
+    # ---------- 右键：透明度 ----------
+    def contextMenuEvent(self, event) -> None:
+        menu = QMenu(self)
+        title = menu.addAction("迷你窗透明度")
+        title.setEnabled(False)
+        group = QActionGroup(menu)
+        for percent in OPACITY_CHOICES:
+            act = menu.addAction(f"{percent}%")
+            act.setCheckable(True)
+            act.setChecked(percent == self._percent)
+            group.addAction(act)
+            act.triggered.connect(
+                lambda _=False, v=percent: self.opacity_selected.emit(v))
+        menu.exec(event.globalPos())
+
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        dot = QColor(theme.TEXT_DIM)
-        dot.setAlpha(int(150 * self._opacity))
+        p.setBrush(QColor(0, 0, 0, _HIT_ALPHA))      # 保证整条把手可点
+        p.drawRect(self.rect())
+        # 2 列 × 3 行的小点阵
+        dot = QColor(theme.TEXT if self._hover else theme.TEXT_DIM)
+        dot.setAlpha(210 if self._hover else 130)
         p.setBrush(dot)
-        cx, cy = GRIP_SIZE / 2, GRIP_SIZE / 2
-        for dy in (-7, 0, 7):
-            p.drawEllipse(QPointF(cx, cy + dy), 2.6, 2.6)
+        cx, cy = GRIP_W / 2 + 1, VISUAL_H / 2
+        for dx in (-3, 3):
+            for dy in (-7, 0, 7):
+                p.drawEllipse(QPointF(cx + dx, cy + dy), 1.5, 1.5)
+        p.end()
+
+
+class IconButton(QAbstractButton):
+    """自绘图标按钮（不依赖字体）：play / pause / cross / skip / expand。"""
+
+    def __init__(self, kind: str, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+        self.accent: QColor | None = None
+        self.setFixedSize(BTN, BTN)
+        self.setCursor(Qt.PointingHandCursor)
+        self._hover = False
+
+    def set_kind(self, kind: str) -> None:
+        if kind != self.kind:
+            self.kind = kind
+            self.update()
+
+    def enterEvent(self, event) -> None:
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event) -> None:
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        if self._hover or self.isDown():
+            bg = QColor(theme.CARD_2)
+            bg.setAlpha(255 if self.isDown() else 230)
+        else:
+            bg = QColor(0, 0, 0, _HIT_ALPHA)
+        p.setBrush(bg)
+        p.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
+
+        base = self.accent or QColor(theme.TEXT_DIM)
+        color = QColor(self.accent or theme.TEXT) if self._hover else QColor(base)
+        p.translate((BTN - 24) / 2, (BTN - 24) / 2)     # 图标按 24×24 设计
+        p.setBrush(color)
+        k = self.kind
+        if k == "play":
+            p.drawPolygon(QPolygonF([QPointF(9.5, 6.5), QPointF(9.5, 17.5),
+                                     QPointF(18, 12)]))
+        elif k == "pause":
+            p.drawRoundedRect(QRectF(8, 7, 3.2, 10), 1, 1)
+            p.drawRoundedRect(QRectF(13, 7, 3.2, 10), 1, 1)
+        elif k == "skip":
+            p.drawPolygon(QPolygonF([QPointF(7.5, 7), QPointF(7.5, 17),
+                                     QPointF(14.5, 12)]))
+            p.drawRoundedRect(QRectF(15.5, 7, 2.2, 10), 1, 1)
+        else:
+            pen = QPen(color, 1.9)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            if k == "cross":                      # 放弃
+                p.drawLine(QPointF(8.5, 8.5), QPointF(15.5, 15.5))
+                p.drawLine(QPointF(15.5, 8.5), QPointF(8.5, 15.5))
+            elif k == "expand":                   # 返回主窗口：向外的双角标
+                path = QPainterPath()
+                path.moveTo(13, 7)
+                path.lineTo(17, 7)
+                path.lineTo(17, 11)
+                path.moveTo(11, 17)
+                path.lineTo(7, 17)
+                path.lineTo(7, 13)
+                p.drawPath(path)
+                p.drawLine(QPointF(8.5, 15.5), QPointF(15.5, 8.5))
         p.end()
 
 
 class MiniControls(QWidget):
-    """控制窗：状态标签 + 按钮行（暂停/放弃/跳过/返回）。"""
+    """右侧按钮区：开始/暂停、放弃、跳过、返回，图标按钮，无自带底色。"""
 
     primary_requested = Signal()
     abandon_requested = Signal()
     skip_requested = Signal()
     expand_requested = Signal()
-    opacity_selected = Signal(int)
+    opacity_selected = Signal(int)   # 保留接口（透明度现由把手右键菜单发出）
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
                             | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(SIZE_W, CONTROLS_H)
-        self._opacity = 1.0
-        self._label = "待机"
+        self.setFixedSize(CONTROLS_W, VISUAL_H)
 
-        self.setStyleSheet("QPushButton { padding: 3px 8px; font-size: 12px; }")
-        self.btn_primary = QPushButton("开始专注")
-        self.btn_primary.setObjectName("primary")
-        self.btn_primary.setFixedHeight(30)
-        self.btn_primary.setMinimumWidth(88)
+        self.btn_primary = IconButton("play")
+        self.btn_primary.accent = QColor(theme.ACCENT)
+        self.btn_primary.setToolTip("开始专注")
         self.btn_primary.clicked.connect(self.primary_requested.emit)
-        self.btn_abandon = QPushButton("放弃")
-        self.btn_abandon.setObjectName("danger")
-        self.btn_abandon.setFixedHeight(30)
+        self.btn_abandon = IconButton("cross")
+        self.btn_abandon.accent = QColor(theme.DANGER)
+        self.btn_abandon.setToolTip("放弃本次专注")
         self.btn_abandon.clicked.connect(self.abandon_requested.emit)
-        self.btn_skip = QPushButton("跳过")
-        self.btn_skip.setFixedHeight(30)
+        self.btn_skip = IconButton("skip")
+        self.btn_skip.setToolTip("跳过休息")
         self.btn_skip.clicked.connect(self.skip_requested.emit)
-        self.btn_expand = QPushButton("返回")
+        self.btn_expand = IconButton("expand")
         self.btn_expand.setToolTip("返回主窗口")
-        self.btn_expand.setFixedHeight(30)
-        self.btn_expand.setFixedWidth(52)
         self.btn_expand.clicked.connect(self.expand_requested.emit)
 
-        row = QHBoxLayout()
-        row.setContentsMargins(10, 0, 10, 0)
-        row.setSpacing(5)
-        row.addWidget(self.btn_primary, stretch=1)
-        row.addWidget(self.btn_abandon)
-        row.addWidget(self.btn_skip)
-        row.addWidget(self.btn_expand)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 4)
-        layout.addLayout(row)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 12, 0)     # 右侧留出药丸圆角
+        row.setSpacing(3)
+        row.addStretch(1)
+        for b in (self.btn_primary, self.btn_abandon, self.btn_skip,
+                  self.btn_expand):
+            row.addWidget(b)
 
     def set_actions(self, primary_text: str, show_primary: bool,
                     show_abandon: bool, show_skip: bool) -> None:
-        self.btn_primary.setText(primary_text)
+        # 主按钮：运行中显示「暂停」图标，其余（开始/继续）显示「播放」图标
+        self.btn_primary.set_kind("pause" if primary_text == "暂停" else "play")
+        self.btn_primary.setToolTip(primary_text)
         self.btn_primary.setVisible(show_primary)
         self.btn_abandon.setVisible(show_abandon)
         self.btn_skip.setVisible(show_skip)
 
-    def set_state_label(self, label: str) -> None:
-        """保留接口（状态已由圆环颜色表达，按钮行不再绘制文字）。"""
-        self._label = label
-
     def set_opacity(self, percent: int) -> None:
-        self._opacity = max(0.15, min(1.0, percent / 100.0))
-        self.update()
+        self.setWindowOpacity(_clamp_opacity(percent))
 
     def paintEvent(self, event) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        op = self._opacity
-        card = QColor(theme.OVERLAY[0], theme.OVERLAY[1], theme.OVERLAY[2],
-                      int(theme.OVERLAY[3] * op))
-        p.setPen(Qt.NoPen)
-        p.setBrush(card)
-        p.drawRoundedRect(QRectF(4, 4, SIZE_W - 8, CONTROLS_H - 8), 14, 14)
-        p.end()
+        pass   # 底色由视觉窗的药丸提供
