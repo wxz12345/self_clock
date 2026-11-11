@@ -15,7 +15,8 @@
 import ctypes
 import sys
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, Qt, Signal
+from PySide6.QtCore import (QPoint, QPointF, QRect, QRectF, QSize, QTimer, Qt,
+                            Signal)
 from PySide6.QtGui import (QActionGroup, QColor, QFont, QFontMetrics,
                            QPainter, QPainterPath, QPen, QPolygonF)
 from PySide6.QtWidgets import QAbstractButton, QHBoxLayout, QMenu, QWidget
@@ -49,6 +50,26 @@ def _set_click_through(hwnd: int) -> None:
     style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
     user32.SetWindowLongPtrW(
         hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
+
+
+def fit_to_screens(pos: QPoint, size: QSize, screens: list[QRect],
+                   primary: QRect) -> QPoint:
+    """把迷你窗的左上角坐标校正到“现在还存在的屏幕”上。
+
+    - 窗口中心落在某块屏幕内：只做边界收拢，保证整条都在这块屏幕里；
+    - 中心不在任何屏幕内（比如它原来在已拔掉的外接显示器上）：回到主屏幕正中。
+    screens 用屏幕的完整几何（含任务栏区域），这样停靠在任务栏上的位置不会被误判。
+    """
+    if not screens:
+        return pos
+    rect = QRect(pos, size)
+    for screen in screens:
+        if screen.contains(rect.center()):
+            x = min(max(pos.x(), screen.left()), screen.right() - size.width() + 1)
+            y = min(max(pos.y(), screen.top()), screen.bottom() - size.height() + 1)
+            return QPoint(x, y)
+    return QPoint(primary.left() + (primary.width() - size.width()) // 2,
+                  primary.top() + (primary.height() - size.height()) // 2)
 
 
 def _clamp_opacity(percent: int) -> float:

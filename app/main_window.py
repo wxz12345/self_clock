@@ -12,7 +12,8 @@ import sys
 import time
 from datetime import date
 
-from PySide6.QtCore import Qt, QThread, QTimer
+from PySide6.QtCore import QPoint, QRect, Qt, QThread, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog,
                                QFileDialog, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QPushButton, QStackedWidget,
@@ -33,7 +34,7 @@ from .close_dialog import CloseDialog
 from .distraction_dialog import DistractionDialog
 from .focus_view import FocusView
 from .mini_overlay import (CONTROLS_OFFSET, GRIP_OFFSET, MiniControls,
-                           MiniGrip, MiniOverlay)
+                           MiniGrip, MiniOverlay, fit_to_screens)
 from .noise_mixer import NoiseMixerDialog
 from .reminder_popup import ReminderPopup
 from .reminders_view import RemindersView
@@ -95,6 +96,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._connect_signals()
+        self._watch_screens()
         self.focus_view.set_mode("stopwatch" if self.stopwatch_mode else "pomodoro")
         self._apply_settings_to_runtime()
         self._close_stale_session()
@@ -395,6 +397,12 @@ class MainWindow(QMainWindow):
         return "待机"
 
     def _on_state_changed(self) -> None:
+        if self.stopwatch_mode:
+            # 顺计时模式下由顺计时自己决定显示。否则启动 / 保存设置时这里会把圆环
+            # 改回“番茄钟待机的 45:00 倒计时”，而顺计时实际是从 0 开始。
+            self._on_stopwatch_state()
+            self._refresh_tree()
+            return
         t = self.timer
         self.focus_view.update_state(t.phase, t.running, t.paused)
         if not t.running:
@@ -445,14 +453,18 @@ class MainWindow(QMainWindow):
             self.tray.act_mini.setText("显示迷你窗")
         else:
             pos = self._load_mini_pos()
+            screens, primary = self._screen_rects()
             if pos:
-                self.overlay.move(pos[0], pos[1])
+                # 记忆的位置可能在已拔掉的外接显示器上：校正到现存屏幕
+                target = fit_to_screens(QPoint(*pos), self.overlay.size(),
+                                        screens, primary)
             else:
-                # 首次打开默认屏幕正中（之后拖动位置自动记忆）
-                screen = QApplication.primaryScreen().availableGeometry()
-                self.overlay.move(
-                    screen.left() + (screen.width() - self.overlay.width()) // 2,
-                    screen.top() + (screen.height() - self.overlay.height()) // 2)
+                # 首次打开默认主屏幕正中（之后拖动位置自动记忆）
+                avail = QApplication.primaryScreen().availableGeometry()
+                target = QPoint(
+                    avail.left() + (avail.width() - self.overlay.width()) // 2,
+                    avail.top() + (avail.height() - self.overlay.height()) // 2)
+            self.overlay.move(target)
             self._sync_mini_windows()
             self._refresh_overlay()
             self.overlay.show()
@@ -461,6 +473,41 @@ class MainWindow(QMainWindow):
             # 迷你模式接管：主窗口隐藏，控制全部在迷你窗上进行
             self.hide()
             self.tray.act_mini.setText("隐藏迷你窗")
+
+    # ---------- 显示器插拔 ----------
+    @staticmethod
+    def _screen_rects() -> tuple[list, object]:
+        screens = [s.geometry() for s in QGuiApplication.screens()]
+        primary = QGuiApplication.primaryScreen()
+        return screens, (primary.geometry() if primary else QRect(0, 0, 1920, 1080))
+
+    def _watch_screens(self) -> None:
+        """显示器插拔 / 分辨率或排列变化时，把迷你窗拉回可见区域。"""
+        app = QGuiApplication.instance()
+        app.screenAdded.connect(self._on_screen_added)
+        app.screenRemoved.connect(self._on_screens_changed)
+        app.primaryScreenChanged.connect(self._on_screens_changed)
+        for screen in app.screens():
+            screen.geometryChanged.connect(self._on_screens_changed)
+
+    def _on_screen_added(self, screen) -> None:
+        screen.geometryChanged.connect(self._on_screens_changed)
+        self._on_screens_changed()
+
+    def _on_screens_changed(self, *_args) -> None:
+        # 系统刚改完布局时窗口可能还没被移动，稍等一下再校正
+        QTimer.singleShot(400, self._relocate_mini)
+
+    def _relocate_mini(self) -> None:
+        if self.overlay is None or not self.overlay.isVisible():
+            return
+        screens, primary = self._screen_rects()
+        target = fit_to_screens(self.overlay.pos(), self.overlay.size(),
+                                screens, primary)
+        if target != self.overlay.pos():
+            self.overlay.move(target)         # moved 信号会带动把手与按钮区
+            self._sync_mini_windows()
+            self._save_mini_pos()
 
     def _sync_mini_windows(self) -> None:
         """把把手和按钮行贴到视觉窗上（视觉窗坐标为准）。"""
@@ -497,7 +544,7 @@ class MainWindow(QMainWindow):
             elapsed = self.stopwatch.elapsed_seconds()
             running = self.stopwatch.running
             text = self.focus_view._fmt_elapsed(elapsed)
-            progress = min(1.0, elapsed / (45 * 60))
+            progress = self._stopwatch_progress(elapsed)
             label = ("⏱ 顺计时中" if running else
                      ("已暂停" if self.stopwatch.elapsed_seconds() > 0 else "待机"))
             self.overlay.set_display(text, progress, "stopwatch")
@@ -691,22 +738,26 @@ class MainWindow(QMainWindow):
         self._refresh_overlay()
         self._update_tray()
 
+    def _stopwatch_progress(self, elapsed: float) -> float:
+        """顺计时圆环进度：整圈 = “专注时长”设置（与番茄钟同一个数），满圈后保持满圈。"""
+        total = max(1.0, self.timer.durations[Phase.FOCUS] * 60)
+        return max(0.0, min(1.0, elapsed / total))
+
     def _on_stopwatch_tick(self, elapsed: float) -> None:
         text = self.focus_view._fmt_elapsed(elapsed)
-        self.focus_view.set_time(text, min(1.0, elapsed / (45 * 60)),
-                                 "stopwatch")
-        self.focus_view.tree.set_state(self._tree_stage(),
-                                       min(1.0, elapsed / (45 * 60)), True)
+        progress = self._stopwatch_progress(elapsed)
+        self.focus_view.set_time(text, progress, "stopwatch")
+        self.focus_view.tree.set_state(self._tree_stage(), progress, True)
         if self.overlay is not None and self.overlay.isVisible():
-            self.overlay.set_display(text, min(1.0, elapsed / (45 * 60)),
-                                     "stopwatch")
+            self.overlay.set_display(text, progress, "stopwatch")
         self._update_tray(f"⏱ {int(elapsed // 60):02d}:{int(elapsed) % 60:02d}")
 
     def _on_stopwatch_state(self) -> None:
         elapsed = self.stopwatch.elapsed_seconds()
         running = self.stopwatch.running
         paused = (not running and elapsed > 0)
-        self.focus_view.set_stopwatch(elapsed, running, paused)
+        self.focus_view.set_stopwatch(
+            elapsed, running, paused, self._stopwatch_progress(elapsed))
         self._refresh_overlay()
         self._update_tray()
         self._sync_usage_pause()

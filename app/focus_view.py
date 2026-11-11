@@ -272,10 +272,10 @@ class FocusView(QWidget):
             self.btn_abandon.setVisible(False)
             self.ring.set_display("00:00", 0.0, "stopwatch")
 
-    def set_stopwatch(self, elapsed: float, running: bool, paused: bool) -> None:
-        total = max(1, elapsed)
+    def set_stopwatch(self, elapsed: float, running: bool, paused: bool,
+                      progress: float) -> None:
+        """progress：圆环进度 0~1，由主窗口按“专注时长”设置换算后传入。"""
         text = self._fmt_elapsed(elapsed)
-        progress = min(1.0, elapsed / (45 * 60))
         self.ring.set_display(text, progress, "stopwatch")
         if running:
             self.phase_label.setText("⏱ 顺计时中")
