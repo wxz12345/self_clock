@@ -6,7 +6,9 @@ from PySide6.QtCore import QDateTime, QSize, Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QSizePolicy, QVBoxLayout, QWidget)
+
+from .elided_label import ElidedLabel
 
 
 class ReminderDialog(QDialog):
@@ -130,20 +132,18 @@ class RemindersView(QWidget):
                 self._add_row(row)
 
     def _add_header(self, text: str) -> None:
-        item = QListWidgetItem(text)
+        # 条目本身不设文字：文字由下面的 QLabel 负责显示。若条目也带同样的文字，
+        # 条目绘制的文字会和叠在上面的 QLabel 错位重叠，表现为“重影”。
+        item = QListWidgetItem()
         item.setFlags(Qt.NoItemFlags)
         item.setSizeHint(QSize(0, 34))
         self.list_widget.addItem(item)
         label = QLabel(text)
         label.setObjectName("muted")
-        if not hasattr(self, "_headers"):
-            self._headers = []
-        self._headers.append(label)
         self.list_widget.setItemWidget(item, label)
 
     def _add_row(self, row) -> None:
         item = QListWidgetItem()
-        item.setSizeHint(QSize(0, self.ROW_HEIGHT))
         self.list_widget.addItem(item)
         widget = QWidget()
         layout = QHBoxLayout(widget)
@@ -152,7 +152,7 @@ class RemindersView(QWidget):
 
         info = QVBoxLayout()
         info.setSpacing(2)
-        title_label = QLabel(row["title"])
+        title_label = ElidedLabel(row["title"])   # 过长自动省略
         title_label.setStyleSheet("font-weight: bold;")
         info.addWidget(title_label)
         detail_parts = []
@@ -164,7 +164,7 @@ class RemindersView(QWidget):
         status = {"pending": "待提醒", "reminded": "已到点", "done": "已完成"}[
             row["status"]]
         detail_parts.append(status)
-        detail = QLabel(" · ".join(detail_parts))
+        detail = ElidedLabel(" · ".join(detail_parts))
         detail.setObjectName("muted2")
         info.addWidget(detail)
         layout.addLayout(info, stretch=1)
@@ -173,14 +173,20 @@ class RemindersView(QWidget):
             snooze_btn = QPushButton("稍后 5 分钟")
             snooze_btn.clicked.connect(
                 lambda _=False, rid=row["id"]: self.snooze_requested.emit(rid))
+            snooze_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             layout.addWidget(snooze_btn)
             done_btn = QPushButton("✓ 完成")
             done_btn.setObjectName("primary")
             done_btn.clicked.connect(
                 lambda _=False, rid=row["id"]: self.complete_requested.emit(rid))
+            done_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             layout.addWidget(done_btn)
         delete_btn = QPushButton("🗑")
         delete_btn.clicked.connect(
             lambda _=False, rid=row["id"]: self.delete_requested.emit(rid))
+        delete_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout.addWidget(delete_btn)
+        # 行高按内容实际需要的高度算（ROW_HEIGHT 为下限），避免按钮被压扁
+        item.setSizeHint(QSize(0, max(self.ROW_HEIGHT,
+                                      widget.sizeHint().height() + 8)))
         self.list_widget.setItemWidget(item, widget)

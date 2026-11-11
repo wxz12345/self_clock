@@ -4,7 +4,9 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPushButton,
-                               QSpinBox, QVBoxLayout, QWidget)
+                               QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
+
+from .elided_label import ElidedLabel
 
 
 class TasksView(QWidget):
@@ -14,6 +16,7 @@ class TasksView(QWidget):
     set_current_task = Signal(object)  # task_id 或 None
 
     ROW_HEIGHT = 46
+    ITEM_PADDING = 8   # 列表项样式的上下内边距（QSS 里 2px*2）+ 余量
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -71,9 +74,16 @@ class TasksView(QWidget):
             return
         for row in tasks:
             item = QListWidgetItem()
-            item.setSizeHint(QSize(0, self.ROW_HEIGHT))
+            widget = self._build_row(row)
+            # 行高按内容实际需要的高度算，ROW_HEIGHT 只是下限。写死行高会把按钮
+            # 压扁（样式里按钮自带内边距，自然高度 31~34px，而列表项还要再扣掉
+            # 自身的内边距），表现为“设为当前”等按钮文字上下被裁。
+            item.setSizeHint(QSize(0, self._row_height_for(widget)))
             self.list_widget.addItem(item)
-            self.list_widget.setItemWidget(item, self._build_row(row))
+            self.list_widget.setItemWidget(item, widget)
+
+    def _row_height_for(self, widget: QWidget) -> int:
+        return max(self.ROW_HEIGHT, widget.sizeHint().height() + self.ITEM_PADDING)
 
     def _build_row(self, row) -> QWidget:
         w = QWidget()
@@ -87,7 +97,7 @@ class TasksView(QWidget):
             lambda checked, tid=row["id"]: self.toggle_task.emit(tid, checked))
         layout.addWidget(checkbox)
 
-        name_label = QLabel(row["name"])
+        name_label = ElidedLabel(row["name"])   # 过长自动省略，不挤掉右侧按钮
         font = QFont()
         font.setStrikeOut(bool(row["done"]))
         name_label.setFont(font)
@@ -98,6 +108,7 @@ class TasksView(QWidget):
 
         progress = QLabel(f"{row['completed']}/{row['estimated']} 🍅")
         progress.setObjectName("muted")
+        progress.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         layout.addWidget(progress)
 
         if self._current_task_id == row["id"] and not row["done"]:
@@ -108,11 +119,13 @@ class TasksView(QWidget):
             current_btn = QPushButton("设为当前")
             current_btn.clicked.connect(
                 lambda _=False, tid=row["id"]: self.set_current_task.emit(tid))
+        current_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout.addWidget(current_btn)
 
         delete_btn = QPushButton("🗑")
         delete_btn.setToolTip("删除任务")
         delete_btn.clicked.connect(
             lambda _=False, tid=row["id"]: self.delete_task.emit(tid))
+        delete_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout.addWidget(delete_btn)
         return w
